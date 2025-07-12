@@ -130,7 +130,7 @@ impl<T: BusHandler> Cpu<T> {
         #[cfg(not(feature = "i8085"))]
         self.flags.set(Flags::AC, (((val1 | val2) >> 3) & 1) == 1);
         #[cfg(feature = "i8085")]
-        self.flags.set(Flags::AC, true);
+        self.flags.insert(Flags::AC);
     }
 
     // Called by or/xor-related opcodes that follow standard flag update behavior.
