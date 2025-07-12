@@ -3,7 +3,7 @@
 //! Note: This is a direct port from my old Space Invaders emulator.
 //! This can likely be rewritten to be cleaner, but status flags are very difficult to get right.
 //! So just go with this for now.
-use crate::{Cpu, Flags, BusHandler};
+use crate::{BusHandler, Cpu, Flags};
 
 impl<T: BusHandler> Cpu<T> {
     /* Adds two values (plus the CY flag if wanted) and if the result is greater
@@ -127,8 +127,10 @@ impl<T: BusHandler> Cpu<T> {
         self.update_flags_log(val1 & val2);
         self.flags.remove(Flags::CY);
 
-        // Weird note: Logical AND ops set AC to the logical or of bit 3
+        #[cfg(not(feature = "i8085"))]
         self.flags.set(Flags::AC, (((val1 | val2) >> 3) & 1) == 1);
+        #[cfg(feature = "i8085")]
+        self.flags.set(Flags::AC, true);
     }
 
     // Called by or/xor-related opcodes that follow standard flag update behavior.
