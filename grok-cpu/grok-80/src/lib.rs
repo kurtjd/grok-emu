@@ -1,14 +1,22 @@
 mod flags;
 mod instructions;
-mod opcode;
+mod opcodes;
 
-pub use opcode::*;
+pub use opcodes::*;
 use std::collections::VecDeque;
 use std::ops::{Index, IndexMut};
 
 type MicroOp<T> = fn(&mut Cpu<T>);
 type TCycles = u64;
 type MCycles = u64;
+
+#[cfg(not(any(
+    feature = "i8080",
+    feature = "i8085",
+    feature = "z80",
+    feature = "sm83"
+)))]
+compile_error!("A CPU variant must be selected!");
 
 pub trait BusHandler {
     fn mem_read(&mut self, addr: u16) -> u8;
