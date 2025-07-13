@@ -460,12 +460,18 @@ impl<T: BusHandler> Cpu<T> {
             Opcode::DI => self.di(),
             Opcode::HLT => self.hlt(),
             Opcode::NOP => self.nop(),
+            #[cfg(feature = "i8085")]
+            Opcode::RIM => todo!(),
+            #[cfg(feature = "i8085")]
+            Opcode::SIM => todo!(),
             // Undefined
             Opcode::UNDEF_1 => self.undef(opcode),
             Opcode::UNDEF_2 => self.undef(opcode),
             Opcode::UNDEF_3 => self.undef(opcode),
+            #[cfg(feature = "i8080")]
             Opcode::UNDEF_4 => self.undef(opcode),
             Opcode::UNDEF_5 => self.undef(opcode),
+            #[cfg(feature = "i8080")]
             Opcode::UNDEF_6 => self.undef(opcode),
             Opcode::UNDEF_7 => self.undef(opcode),
             Opcode::UNDEF_8 => self.undef(opcode),

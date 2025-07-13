@@ -50,7 +50,10 @@ pub enum Opcode {
     DCR_E,
     MVI_E,
     RAR,
+    #[cfg(feature = "i8080")]
     UNDEF_4,
+    #[cfg(feature = "i8085")]
+    RIM,
     LXI_H,
     SHLD,
     INX_H,
@@ -66,7 +69,10 @@ pub enum Opcode {
     DCR_L,
     MVI_L,
     CMA,
+    #[cfg(feature = "i8080")]
     UNDEF_6,
+    #[cfg(feature = "i8085")]
+    SIM,
     LXI_SP,
     STA,
     INX_SP,
@@ -1853,6 +1859,19 @@ impl Opcode {
                 t_per_m: [Some(4), None, None, None, None],
             },
 
+            #[cfg(feature = "i8085")]
+            Opcode::RIM => OpcodeInfo {
+                name: "RIM",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            #[cfg(feature = "i8085")]
+            Opcode::SIM => OpcodeInfo {
+                name: "SIM",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+
             Opcode::UNDEF_1 => OpcodeInfo {
                 name: "UNDEF 1",
                 len: 1,
@@ -1868,6 +1887,7 @@ impl Opcode {
                 len: 1,
                 t_per_m: [Some(4), None, None, None, None],
             },
+            #[cfg(feature = "i8080")]
             Opcode::UNDEF_4 => OpcodeInfo {
                 name: "UNDEF 4",
                 len: 1,
@@ -1878,6 +1898,7 @@ impl Opcode {
                 len: 1,
                 t_per_m: [Some(4), None, None, None, None],
             },
+            #[cfg(feature = "i8080")]
             Opcode::UNDEF_6 => OpcodeInfo {
                 name: "UNDEF 6",
                 len: 1,
