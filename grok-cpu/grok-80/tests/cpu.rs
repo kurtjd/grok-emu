@@ -57,7 +57,7 @@ fn run_test(rom: &[u8]) -> bool {
     bus.mem_load(0x00, include_bytes!("../roms/CPM.bin"));
 
     // Tests jump to 0x00 when complete, so insert an OUT here for exit
-    bus.mem_load(0x00, &[Opcode::OUTP as u8, 0x01]);
+    bus.mem_load(0x00, &[Opcode::OUT as u8, 0x01]);
 
     // Test ROMs expect to be loaded at 0x100
     bus.mem_load(0x100, rom);

@@ -6,11 +6,9 @@ pub use opcode::*;
 use std::collections::VecDeque;
 use std::ops::{Index, IndexMut};
 
-type MicroOp<T> = fn(&mut Cpu<T>) -> u64;
+type MicroOp<T> = fn(&mut Cpu<T>);
 type TCycles = u64;
 type MCycles = u64;
-
-const T_PER_FETCH: TCycles = 4;
 
 pub trait BusHandler {
     fn mem_read(&mut self, addr: u16) -> u8;
@@ -53,8 +51,8 @@ bitflags::bitflags! {
 }
 
 pub struct Cycles {
-    pub t_cycles: TCycles,
-    pub m_cycles: MCycles,
+    pub tcycles: TCycles,
+    pub mcycles: MCycles,
 }
 
 #[derive(PartialEq, Eq)]
@@ -73,6 +71,8 @@ pub struct Cpu<T: BusHandler> {
     gpr: [u8; 8],
     // Special 5-bit status flags register
     flags: Flags,
+    // Hidden, temporary work registers
+    wz: [u8; 2],
     // Interrupt enable state
     iff: IffState,
     // Pending interrupt opcode (almost always a RST_N)
@@ -83,8 +83,10 @@ pub struct Cpu<T: BusHandler> {
     bus: T,
     // A "pipeline" of micro ops (each representing an M-cycle)
     pipeline: VecDeque<MicroOp<T>>,
-    // Mainly used to store fetched operands in between M-cycles, but sometimes used for other things
-    tmp: [u8; 2],
+    // Current opcode being executed
+    op_info: OpcodeInfo,
+    // Current M-cycle being executed
+    mcycle: usize,
 }
 
 impl<T: BusHandler> Cpu<T> {
@@ -95,12 +97,14 @@ impl<T: BusHandler> Cpu<T> {
             sp: 0x0000,
             gpr: [0x00; 8],
             flags: Flags::empty(),
+            wz: [0x00; 2],
             iff: IffState::Disabled,
             interrupt: None,
             halt: false,
             bus,
             pipeline: VecDeque::new(),
-            tmp: [0x00; 2],
+            op_info: Opcode::UNDEF_1.info(),
+            mcycle: 0,
         }
     }
 
@@ -108,7 +112,7 @@ impl<T: BusHandler> Cpu<T> {
     pub fn tick(&mut self) -> Option<TCycles> {
         // If the pipeline is not empty, then work our way through it.
         if let Some(micro_op) = self.pipeline.pop_front() {
-            Some(micro_op(self))
+            micro_op(self);
 
         // If the pipeline is empty, we know we've finished executing the previous instruction.
         // So fetch the next one.
@@ -117,12 +121,12 @@ impl<T: BusHandler> Cpu<T> {
 
             // Executing the instruction really means it pushes its micro ops to the pipeline.
             // Though instructions consisting of a single M-cycle will also just immediately execute here.
-            let t_cycles = self.execute(opcode);
-
-            // Fetching itself counts as an M-cycle,
-            // plus additional T-cycles (rare) if instruction executed immediately.
-            Some(T_PER_FETCH + t_cycles)
+            self.execute(opcode);
         }
+
+        let tcycles = self.op_info.t_per_m[self.mcycle];
+        self.mcycle += 1;
+        tcycles
     }
 
     /// Advances the CPU one instruction and returns the number of M and T cycles taken
@@ -133,22 +137,24 @@ impl<T: BusHandler> Cpu<T> {
         // Fetch the next instruction
         let opcode = self.fetch()?;
 
-        // Initialize with fetch cycle count
-        let mut t_cycles = self.execute(opcode) + T_PER_FETCH;
-        let mut m_cycles = 1;
+        self.execute(opcode);
 
         // Execute every micro op in the pipeline tracking total number of M and T cycles
+        let mut tcycles = 0;
         while let Some(micro_op) = self.pipeline.pop_front() {
-            t_cycles += micro_op(self);
-            m_cycles += 1;
+            micro_op(self);
+            tcycles += self.op_info.t_per_m[self.mcycle]?;
+            self.mcycle += 1;
         }
 
-        Some(Cycles { t_cycles, m_cycles })
+        let mcycles = self.mcycle as u64;
+        Some(Cycles { tcycles, mcycles })
     }
 
     /// Resets CPU setting PC to addr
     pub fn reset(&mut self, addr: u16) {
         self.pipeline.clear();
+        self.mcycle = 0;
         self.halt = false;
         self.iff = IffState::Disabled;
         self.interrupt = None;
@@ -172,7 +178,7 @@ impl<T: BusHandler> Cpu<T> {
 
     fn fetch(&mut self) -> Option<Opcode> {
         // If interrupts are enabled and an interrupt is pending, handle it
-        if self.iff == IffState::Enabled
+        let opcode = if self.iff == IffState::Enabled
             && let Some(opcode) = self.interrupt
         {
             self.iff = IffState::Disabled;
@@ -194,10 +200,14 @@ impl<T: BusHandler> Cpu<T> {
             let opcode = Opcode::from(self.bus.mem_read(self.pc));
             self.pc = self.pc.wrapping_add(1);
             Some(opcode)
-        }
+        };
+
+        self.mcycle = 0;
+        self.op_info = opcode?.info();
+        opcode
     }
 
-    fn execute(&mut self, opcode: Opcode) -> TCycles {
+    fn execute(&mut self, opcode: Opcode) {
         match opcode {
             // Data Transfer Group
             Opcode::MOV_A_A => self.mov_r_r(Register::A, Register::A),
@@ -443,8 +453,8 @@ impl<T: BusHandler> Cpu<T> {
             Opcode::XTHL => self.xthl(),
             Opcode::SPHL => self.sphl(),
             // IO Group
-            Opcode::INP => self.inp(),
-            Opcode::OUTP => self.outp(),
+            Opcode::IN => self.inp(),
+            Opcode::OUT => self.outp(),
             // Machine Group
             Opcode::EI => self.ei(),
             Opcode::DI => self.di(),
@@ -490,23 +500,6 @@ impl<T: BusHandler> Cpu<T> {
             | (flag(Flags::CY))
     }
 
-    /*fn flags_to_str(&self) -> String {
-        let flag = |f: &str, set: bool| -> String {
-            if set {
-                f.to_string()
-            } else {
-                f.to_ascii_lowercase()
-            }
-        };
-        let flags = [
-            flag("S", self.flags.contains(Flags::S)),
-            flag("Z", self.flags.contains(Flags::Z)),
-            flag("AC", self.flags.contains(Flags::AC)),
-            flag("P", self.flags.contains(Flags::P)),
-            flag("CY", self.flags.contains(Flags::CY)),
-        ];
-        flags.join(" ")
-    }*/
     fn flags_to_str(&self) -> String {
         self.flags
             .iter()

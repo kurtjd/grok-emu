@@ -1,14 +1,16 @@
 use num_enum::FromPrimitive;
 
+use crate::TCycles;
+
+const MCYCLES_MAX: usize = 5;
+
+#[cfg(feature = "sm83")]
+const T_PER_M: TCycles = 4;
+
 pub struct OpcodeInfo {
     pub name: &'static str,
     pub len: u8,
-}
-
-impl OpcodeInfo {
-    fn new(name: &'static str, len: u8) -> Self {
-        Self { name, len }
-    }
+    pub t_per_m: [Option<TCycles>; MCYCLES_MAX],
 }
 
 #[derive(Copy, Clone, Debug, FromPrimitive)]
@@ -227,7 +229,7 @@ pub enum Opcode {
     RNC,
     POP_D,
     JNC,
-    OUTP,
+    OUT,
     CNC,
     PUSH_D,
     SUI,
@@ -235,7 +237,7 @@ pub enum Opcode {
     RC,
     UNDEF_9,
     JC,
-    INP,
+    IN,
     CC,
     UNDEF_10,
     SBI,
@@ -275,264 +277,1642 @@ pub enum Opcode {
 }
 
 impl Opcode {
-    pub fn info(&self) -> OpcodeInfo {
+    pub const fn info(&self) -> OpcodeInfo {
         match self {
-            Opcode::NOP => OpcodeInfo::new("NOP", 1),
-            Opcode::LXI_B => OpcodeInfo::new("LXI B,", 3),
-            Opcode::STAX_B => OpcodeInfo::new("STAX B", 1),
-            Opcode::INX_B => OpcodeInfo::new("INX B", 1),
-            Opcode::INR_B => OpcodeInfo::new("INR B", 1),
-            Opcode::DCR_B => OpcodeInfo::new("DCR B", 1),
-            Opcode::MVI_B => OpcodeInfo::new("MVI B,", 2),
-            Opcode::RLC => OpcodeInfo::new("RLC", 1),
-            Opcode::UNDEF_1 => OpcodeInfo::new("UNDEF 1", 1),
-            Opcode::DAD_B => OpcodeInfo::new("DAD B", 1),
-            Opcode::LDAX_B => OpcodeInfo::new("LDAX B", 1),
-            Opcode::DCX_B => OpcodeInfo::new("DCX B", 1),
-            Opcode::INR_C => OpcodeInfo::new("INR C", 1),
-            Opcode::DCR_C => OpcodeInfo::new("DCR C", 1),
-            Opcode::MVI_C => OpcodeInfo::new("MVI C,", 2),
-            Opcode::RRC => OpcodeInfo::new("RRC", 1),
-            Opcode::UNDEF_2 => OpcodeInfo::new("UNDEF 2", 1),
-            Opcode::LXI_D => OpcodeInfo::new("LXI D,", 3),
-            Opcode::STAX_D => OpcodeInfo::new("STAX D", 1),
-            Opcode::INX_D => OpcodeInfo::new("INX D", 1),
-            Opcode::INR_D => OpcodeInfo::new("INR D", 1),
-            Opcode::DCR_D => OpcodeInfo::new("DCR D", 1),
-            Opcode::MVI_D => OpcodeInfo::new("MVI D,", 2),
-            Opcode::RAL => OpcodeInfo::new("RAL", 1),
-            Opcode::UNDEF_3 => OpcodeInfo::new("UNDEF 3", 1),
-            Opcode::DAD_D => OpcodeInfo::new("DAD D", 1),
-            Opcode::LDAX_D => OpcodeInfo::new("LDAX D", 1),
-            Opcode::DCX_D => OpcodeInfo::new("DCX D", 1),
-            Opcode::INR_E => OpcodeInfo::new("INR E", 1),
-            Opcode::DCR_E => OpcodeInfo::new("DCR E", 1),
-            Opcode::MVI_E => OpcodeInfo::new("MVI E,", 2),
-            Opcode::RAR => OpcodeInfo::new("RAR", 1),
-            Opcode::UNDEF_4 => OpcodeInfo::new("UNDEF 4", 1),
-            Opcode::LXI_H => OpcodeInfo::new("LXI H,", 3),
-            Opcode::SHLD => OpcodeInfo::new("SHLD", 3),
-            Opcode::INX_H => OpcodeInfo::new("INX H", 1),
-            Opcode::INR_H => OpcodeInfo::new("INR H", 1),
-            Opcode::DCR_H => OpcodeInfo::new("DCR H", 1),
-            Opcode::MVI_H => OpcodeInfo::new("MVI H,", 2),
-            Opcode::DAA => OpcodeInfo::new("DAA", 1),
-            Opcode::UNDEF_5 => OpcodeInfo::new("UNDEF 5", 1),
-            Opcode::DAD_H => OpcodeInfo::new("DAD H", 1),
-            Opcode::LHLD => OpcodeInfo::new("LHLD ", 3),
-            Opcode::DCX_H => OpcodeInfo::new("DCX H", 1),
-            Opcode::INR_L => OpcodeInfo::new("INR L", 1),
-            Opcode::DCR_L => OpcodeInfo::new("DCR L", 1),
-            Opcode::MVI_L => OpcodeInfo::new("MVI L,", 2),
-            Opcode::CMA => OpcodeInfo::new("CMA", 1),
-            Opcode::UNDEF_6 => OpcodeInfo::new("UNDEF 6", 1),
-            Opcode::LXI_SP => OpcodeInfo::new("LXI SP,", 3),
-            Opcode::STA => OpcodeInfo::new("STA ", 3),
-            Opcode::INX_SP => OpcodeInfo::new("INX SP", 1),
-            Opcode::INR_M => OpcodeInfo::new("INR M", 1),
-            Opcode::DCR_M => OpcodeInfo::new("DCR M", 1),
-            Opcode::MVI_M => OpcodeInfo::new("MVI M,", 2),
-            Opcode::STC => OpcodeInfo::new("STC", 1),
-            Opcode::UNDEF_7 => OpcodeInfo::new("UNDEF 7", 1),
-            Opcode::DAD_SP => OpcodeInfo::new("DAD SP", 1),
-            Opcode::LDA => OpcodeInfo::new("LDA ", 3),
-            Opcode::DCX_SP => OpcodeInfo::new("DCX SP", 1),
-            Opcode::INR_A => OpcodeInfo::new("INR A", 1),
-            Opcode::DCR_A => OpcodeInfo::new("DCR A", 1),
-            Opcode::MVI_A => OpcodeInfo::new("MVI A,", 2),
-            Opcode::CMC => OpcodeInfo::new("CMC", 1),
-            Opcode::MOV_B_B => OpcodeInfo::new("MOV B,B", 1),
-            Opcode::MOV_B_C => OpcodeInfo::new("MOV B,C", 1),
-            Opcode::MOV_B_D => OpcodeInfo::new("MOV B,D", 1),
-            Opcode::MOV_B_E => OpcodeInfo::new("MOV B,E", 1),
-            Opcode::MOV_B_H => OpcodeInfo::new("MOV B,H", 1),
-            Opcode::MOV_B_L => OpcodeInfo::new("MOV B,L", 1),
-            Opcode::MOV_B_M => OpcodeInfo::new("MOV B,M", 1),
-            Opcode::MOV_B_A => OpcodeInfo::new("MOV B,A", 1),
-            Opcode::MOV_C_B => OpcodeInfo::new("MOV C,B", 1),
-            Opcode::MOV_C_C => OpcodeInfo::new("MOV C,C", 1),
-            Opcode::MOV_C_D => OpcodeInfo::new("MOV C,D", 1),
-            Opcode::MOV_C_E => OpcodeInfo::new("MOV C,E", 1),
-            Opcode::MOV_C_H => OpcodeInfo::new("MOV C,H", 1),
-            Opcode::MOV_C_L => OpcodeInfo::new("MOV C,L", 1),
-            Opcode::MOV_C_M => OpcodeInfo::new("MOV C,M", 1),
-            Opcode::MOV_C_A => OpcodeInfo::new("MOV C,A", 1),
-            Opcode::MOV_D_B => OpcodeInfo::new("MOV D,B", 1),
-            Opcode::MOV_D_C => OpcodeInfo::new("MOV D,C", 1),
-            Opcode::MOV_D_D => OpcodeInfo::new("MOV D,D", 1),
-            Opcode::MOV_D_E => OpcodeInfo::new("MOV D,E", 1),
-            Opcode::MOV_D_H => OpcodeInfo::new("MOV D,H", 1),
-            Opcode::MOV_D_L => OpcodeInfo::new("MOV D,L", 1),
-            Opcode::MOV_D_M => OpcodeInfo::new("MOV D,M", 1),
-            Opcode::MOV_D_A => OpcodeInfo::new("MOV D,A", 1),
-            Opcode::MOV_E_B => OpcodeInfo::new("MOV E,B", 1),
-            Opcode::MOV_E_C => OpcodeInfo::new("MOV E,C", 1),
-            Opcode::MOV_E_D => OpcodeInfo::new("MOV E,D", 1),
-            Opcode::MOV_E_E => OpcodeInfo::new("MOV E,E", 1),
-            Opcode::MOV_E_H => OpcodeInfo::new("MOV E,H", 1),
-            Opcode::MOV_E_L => OpcodeInfo::new("MOV E,L", 1),
-            Opcode::MOV_E_M => OpcodeInfo::new("MOV E,M", 1),
-            Opcode::MOV_E_A => OpcodeInfo::new("MOV E,A", 1),
-            Opcode::MOV_H_B => OpcodeInfo::new("MOV H,B", 1),
-            Opcode::MOV_H_C => OpcodeInfo::new("MOV H,C", 1),
-            Opcode::MOV_H_D => OpcodeInfo::new("MOV H,D", 1),
-            Opcode::MOV_H_E => OpcodeInfo::new("MOV H,E", 1),
-            Opcode::MOV_H_H => OpcodeInfo::new("MOV H,H", 1),
-            Opcode::MOV_H_L => OpcodeInfo::new("MOV H,L", 1),
-            Opcode::MOV_H_M => OpcodeInfo::new("MOV H,M", 1),
-            Opcode::MOV_H_A => OpcodeInfo::new("MOV H,A", 1),
-            Opcode::MOV_L_B => OpcodeInfo::new("MOV L,B", 1),
-            Opcode::MOV_L_C => OpcodeInfo::new("MOV L,C", 1),
-            Opcode::MOV_L_D => OpcodeInfo::new("MOV L,D", 1),
-            Opcode::MOV_L_E => OpcodeInfo::new("MOV L,E", 1),
-            Opcode::MOV_L_H => OpcodeInfo::new("MOV L,H", 1),
-            Opcode::MOV_L_L => OpcodeInfo::new("MOV L,L", 1),
-            Opcode::MOV_L_M => OpcodeInfo::new("MOV L,M", 1),
-            Opcode::MOV_L_A => OpcodeInfo::new("MOV L,A", 1),
-            Opcode::MOV_M_B => OpcodeInfo::new("MOV M,B", 1),
-            Opcode::MOV_M_C => OpcodeInfo::new("MOV M,C", 1),
-            Opcode::MOV_M_D => OpcodeInfo::new("MOV M,D", 1),
-            Opcode::MOV_M_E => OpcodeInfo::new("MOV M,E", 1),
-            Opcode::MOV_M_H => OpcodeInfo::new("MOV M,H", 1),
-            Opcode::MOV_M_L => OpcodeInfo::new("MOV M,L", 1),
-            Opcode::HLT => OpcodeInfo::new("HLT", 1),
-            Opcode::MOV_M_A => OpcodeInfo::new("MOV M,A", 1),
-            Opcode::MOV_A_B => OpcodeInfo::new("MOV A,B", 1),
-            Opcode::MOV_A_C => OpcodeInfo::new("MOV A,C", 1),
-            Opcode::MOV_A_D => OpcodeInfo::new("MOV A,D", 1),
-            Opcode::MOV_A_E => OpcodeInfo::new("MOV A,E", 1),
-            Opcode::MOV_A_H => OpcodeInfo::new("MOV A,H", 1),
-            Opcode::MOV_A_L => OpcodeInfo::new("MOV A,L", 1),
-            Opcode::MOV_A_M => OpcodeInfo::new("MOV A,M", 1),
-            Opcode::MOV_A_A => OpcodeInfo::new("MOV A,A", 1),
-            Opcode::ADD_B => OpcodeInfo::new("ADD B", 1),
-            Opcode::ADD_C => OpcodeInfo::new("ADD C", 1),
-            Opcode::ADD_D => OpcodeInfo::new("ADD D", 1),
-            Opcode::ADD_E => OpcodeInfo::new("ADD E", 1),
-            Opcode::ADD_H => OpcodeInfo::new("ADD H", 1),
-            Opcode::ADD_L => OpcodeInfo::new("ADD L", 1),
-            Opcode::ADD_M => OpcodeInfo::new("ADD M", 1),
-            Opcode::ADD_A => OpcodeInfo::new("ADD A", 1),
-            Opcode::ADC_B => OpcodeInfo::new("ADC B", 1),
-            Opcode::ADC_C => OpcodeInfo::new("ADC C", 1),
-            Opcode::ADC_D => OpcodeInfo::new("ADC D", 1),
-            Opcode::ADC_E => OpcodeInfo::new("ADC E", 1),
-            Opcode::ADC_H => OpcodeInfo::new("ADC H", 1),
-            Opcode::ADC_L => OpcodeInfo::new("ADC L", 1),
-            Opcode::ADC_M => OpcodeInfo::new("ADC M", 1),
-            Opcode::ADC_A => OpcodeInfo::new("ADC A", 1),
-            Opcode::SUB_B => OpcodeInfo::new("SUB B", 1),
-            Opcode::SUB_C => OpcodeInfo::new("SUB C", 1),
-            Opcode::SUB_D => OpcodeInfo::new("SUB D", 1),
-            Opcode::SUB_E => OpcodeInfo::new("SUB E", 1),
-            Opcode::SUB_H => OpcodeInfo::new("SUB H", 1),
-            Opcode::SUB_L => OpcodeInfo::new("SUB L", 1),
-            Opcode::SUB_M => OpcodeInfo::new("SUB M", 1),
-            Opcode::SUB_A => OpcodeInfo::new("SUB A", 1),
-            Opcode::SBB_B => OpcodeInfo::new("SBB B", 1),
-            Opcode::SBB_C => OpcodeInfo::new("SBB C", 1),
-            Opcode::SBB_D => OpcodeInfo::new("SBB D", 1),
-            Opcode::SBB_E => OpcodeInfo::new("SBB E", 1),
-            Opcode::SBB_H => OpcodeInfo::new("SBB H", 1),
-            Opcode::SBB_L => OpcodeInfo::new("SBB L", 1),
-            Opcode::SBB_M => OpcodeInfo::new("SBB M", 1),
-            Opcode::SBB_A => OpcodeInfo::new("SBB A", 1),
-            Opcode::ANA_B => OpcodeInfo::new("ANA B", 1),
-            Opcode::ANA_C => OpcodeInfo::new("ANA C", 1),
-            Opcode::ANA_D => OpcodeInfo::new("ANA D", 1),
-            Opcode::ANA_E => OpcodeInfo::new("ANA E", 1),
-            Opcode::ANA_H => OpcodeInfo::new("ANA H", 1),
-            Opcode::ANA_L => OpcodeInfo::new("ANA L", 1),
-            Opcode::ANA_M => OpcodeInfo::new("ANA M", 1),
-            Opcode::ANA_A => OpcodeInfo::new("ANA A", 1),
-            Opcode::XRA_B => OpcodeInfo::new("XRA B", 1),
-            Opcode::XRA_C => OpcodeInfo::new("XRA C", 1),
-            Opcode::XRA_D => OpcodeInfo::new("XRA D", 1),
-            Opcode::XRA_E => OpcodeInfo::new("XRA E", 1),
-            Opcode::XRA_H => OpcodeInfo::new("XRA H", 1),
-            Opcode::XRA_L => OpcodeInfo::new("XRA L", 1),
-            Opcode::XRA_M => OpcodeInfo::new("XRA M", 1),
-            Opcode::XRA_A => OpcodeInfo::new("XRA A", 1),
-            Opcode::ORA_B => OpcodeInfo::new("ORA B", 1),
-            Opcode::ORA_C => OpcodeInfo::new("ORA C", 1),
-            Opcode::ORA_D => OpcodeInfo::new("ORA D", 1),
-            Opcode::ORA_E => OpcodeInfo::new("ORA E", 1),
-            Opcode::ORA_H => OpcodeInfo::new("ORA H", 1),
-            Opcode::ORA_L => OpcodeInfo::new("ORA L", 1),
-            Opcode::ORA_M => OpcodeInfo::new("ORA M", 1),
-            Opcode::ORA_A => OpcodeInfo::new("ORA A", 1),
-            Opcode::CMP_B => OpcodeInfo::new("CMP B", 1),
-            Opcode::CMP_C => OpcodeInfo::new("CMP C", 1),
-            Opcode::CMP_D => OpcodeInfo::new("CMP D", 1),
-            Opcode::CMP_E => OpcodeInfo::new("CMP E", 1),
-            Opcode::CMP_H => OpcodeInfo::new("CMP H", 1),
-            Opcode::CMP_L => OpcodeInfo::new("CMP L", 1),
-            Opcode::CMP_M => OpcodeInfo::new("CMP M", 1),
-            Opcode::CMP_A => OpcodeInfo::new("CMP A", 1),
-            Opcode::RNZ => OpcodeInfo::new("RNZ", 1),
-            Opcode::POP_B => OpcodeInfo::new("POP B", 1),
-            Opcode::JNZ => OpcodeInfo::new("JNZ ", 3),
-            Opcode::JMP => OpcodeInfo::new("JMP ", 3),
-            Opcode::CNZ => OpcodeInfo::new("CNZ ", 3),
-            Opcode::PUSH_B => OpcodeInfo::new("PUSH B", 1),
-            Opcode::ADI => OpcodeInfo::new("ADI ", 2),
-            Opcode::RST_0 => OpcodeInfo::new("RST 0", 1),
-            Opcode::RZ => OpcodeInfo::new("RZ", 1),
-            Opcode::RET => OpcodeInfo::new("RET", 1),
-            Opcode::JZ => OpcodeInfo::new("JZ ", 3),
-            Opcode::UNDEF_8 => OpcodeInfo::new("UNDEF 8", 1),
-            Opcode::CZ => OpcodeInfo::new("CZ ", 3),
-            Opcode::CALL => OpcodeInfo::new("CALL ", 3),
-            Opcode::ACI => OpcodeInfo::new("ACI ", 2),
-            Opcode::RST_1 => OpcodeInfo::new("RST 1", 1),
-            Opcode::RNC => OpcodeInfo::new("RNC", 1),
-            Opcode::POP_D => OpcodeInfo::new("POP D", 1),
-            Opcode::JNC => OpcodeInfo::new("JNC ", 3),
-            Opcode::OUTP => OpcodeInfo::new("OUT ", 2),
-            Opcode::CNC => OpcodeInfo::new("CNC ", 3),
-            Opcode::PUSH_D => OpcodeInfo::new("PUSH D", 1),
-            Opcode::SUI => OpcodeInfo::new("SUI ", 2),
-            Opcode::RST_2 => OpcodeInfo::new("RST 2", 1),
-            Opcode::RC => OpcodeInfo::new("RC", 1),
-            Opcode::UNDEF_9 => OpcodeInfo::new("UNDEF 9", 1),
-            Opcode::JC => OpcodeInfo::new("JC ", 3),
-            Opcode::INP => OpcodeInfo::new("IN ", 2),
-            Opcode::CC => OpcodeInfo::new("CC ", 3),
-            Opcode::UNDEF_10 => OpcodeInfo::new("UNDEF 10", 1),
-            Opcode::SBI => OpcodeInfo::new("SBI ", 2),
-            Opcode::RST_3 => OpcodeInfo::new("RST 3", 1),
-            Opcode::RPO => OpcodeInfo::new("RPO", 1),
-            Opcode::POP_H => OpcodeInfo::new("POP H", 1),
-            Opcode::JPO => OpcodeInfo::new("JPO ", 3),
-            Opcode::XTHL => OpcodeInfo::new("XTHL", 1),
-            Opcode::CPO => OpcodeInfo::new("CPO ", 3),
-            Opcode::PUSH_H => OpcodeInfo::new("PUSH H", 1),
-            Opcode::ANI => OpcodeInfo::new("ANI ", 2),
-            Opcode::RST_4 => OpcodeInfo::new("RST 4", 1),
-            Opcode::RPE => OpcodeInfo::new("RPE", 1),
-            Opcode::PCHL => OpcodeInfo::new("PCHL", 1),
-            Opcode::JPE => OpcodeInfo::new("JPE ", 3),
-            Opcode::XCHG => OpcodeInfo::new("XCHG", 1),
-            Opcode::CPE => OpcodeInfo::new("CPE ", 3),
-            Opcode::UNDEF_11 => OpcodeInfo::new("UNDEF 11", 1),
-            Opcode::XRI => OpcodeInfo::new("XRI ", 2),
-            Opcode::RST_5 => OpcodeInfo::new("RST 5", 1),
-            Opcode::RP => OpcodeInfo::new("RP", 1),
-            Opcode::POP_PSW => OpcodeInfo::new("POP PSW", 1),
-            Opcode::JP => OpcodeInfo::new("JP ", 3),
-            Opcode::DI => OpcodeInfo::new("DI", 1),
-            Opcode::CP => OpcodeInfo::new("CP ", 3),
-            Opcode::PUSH_PSW => OpcodeInfo::new("PUSH PSW", 1),
-            Opcode::ORI => OpcodeInfo::new("ORI ", 2),
-            Opcode::RST_6 => OpcodeInfo::new("RST 6", 1),
-            Opcode::RM => OpcodeInfo::new("RM", 1),
-            Opcode::SPHL => OpcodeInfo::new("SPHL", 1),
-            Opcode::JM => OpcodeInfo::new("JM ", 3),
-            Opcode::EI => OpcodeInfo::new("EI", 1),
-            Opcode::CM => OpcodeInfo::new("CM ", 3),
-            Opcode::UNDEF_12 => OpcodeInfo::new("UNDEF 12", 1),
-            Opcode::CPI => OpcodeInfo::new("CPI ", 2),
-            Opcode::RST_7 => OpcodeInfo::new("RST 7", 1),
+            // Data Transfer Group
+            Opcode::MOV_A_A => OpcodeInfo {
+                name: "MOV A,A",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_A_B => OpcodeInfo {
+                name: "MOV A,B",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_A_C => OpcodeInfo {
+                name: "MOV A,C",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_A_D => OpcodeInfo {
+                name: "MOV A,D",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_A_E => OpcodeInfo {
+                name: "MOV A,E",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_A_H => OpcodeInfo {
+                name: "MOV A,H",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_A_L => OpcodeInfo {
+                name: "MOV A,L",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_B_A => OpcodeInfo {
+                name: "MOV B,A",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_B_B => OpcodeInfo {
+                name: "MOV B,B",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_B_C => OpcodeInfo {
+                name: "MOV B,C",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_B_D => OpcodeInfo {
+                name: "MOV B,D",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_B_E => OpcodeInfo {
+                name: "MOV B,E",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_B_H => OpcodeInfo {
+                name: "MOV B,H",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_B_L => OpcodeInfo {
+                name: "MOV B,L",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_C_A => OpcodeInfo {
+                name: "MOV C,A",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_C_B => OpcodeInfo {
+                name: "MOV C,B",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_C_C => OpcodeInfo {
+                name: "MOV C,C",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_C_D => OpcodeInfo {
+                name: "MOV C,D",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_C_E => OpcodeInfo {
+                name: "MOV C,E",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_C_H => OpcodeInfo {
+                name: "MOV C,H",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_C_L => OpcodeInfo {
+                name: "MOV C,L",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_D_A => OpcodeInfo {
+                name: "MOV D,A",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_D_B => OpcodeInfo {
+                name: "MOV D,B",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_D_C => OpcodeInfo {
+                name: "MOV D,C",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_D_D => OpcodeInfo {
+                name: "MOV D,D",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_D_E => OpcodeInfo {
+                name: "MOV D,E",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_D_H => OpcodeInfo {
+                name: "MOV D,H",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_D_L => OpcodeInfo {
+                name: "MOV D,L",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_E_A => OpcodeInfo {
+                name: "MOV E,A",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_E_B => OpcodeInfo {
+                name: "MOV E,B",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_E_C => OpcodeInfo {
+                name: "MOV E,C",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_E_D => OpcodeInfo {
+                name: "MOV E,D",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_E_E => OpcodeInfo {
+                name: "MOV E,E",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_E_H => OpcodeInfo {
+                name: "MOV E,H",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_E_L => OpcodeInfo {
+                name: "MOV E,L",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_H_A => OpcodeInfo {
+                name: "MOV H,A",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_H_B => OpcodeInfo {
+                name: "MOV H,B",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_H_C => OpcodeInfo {
+                name: "MOV H,C",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_H_D => OpcodeInfo {
+                name: "MOV H,D",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_H_E => OpcodeInfo {
+                name: "MOV H,E",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_H_H => OpcodeInfo {
+                name: "MOV H,H",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_H_L => OpcodeInfo {
+                name: "MOV H,L",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_L_A => OpcodeInfo {
+                name: "MOV L,A",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_L_B => OpcodeInfo {
+                name: "MOV L,B",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_L_C => OpcodeInfo {
+                name: "MOV L,C",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_L_D => OpcodeInfo {
+                name: "MOV L,D",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_L_E => OpcodeInfo {
+                name: "MOV L,E",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_L_H => OpcodeInfo {
+                name: "MOV L,H",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::MOV_L_L => OpcodeInfo {
+                name: "MOV L,L",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+
+            Opcode::MOV_A_M => OpcodeInfo {
+                name: "MOV A,M",
+                len: 1,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+            Opcode::MOV_B_M => OpcodeInfo {
+                name: "MOV B,M",
+                len: 1,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+            Opcode::MOV_C_M => OpcodeInfo {
+                name: "MOV C,M",
+                len: 1,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+            Opcode::MOV_D_M => OpcodeInfo {
+                name: "MOV D,M",
+                len: 1,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+            Opcode::MOV_E_M => OpcodeInfo {
+                name: "MOV E,M",
+                len: 1,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+            Opcode::MOV_H_M => OpcodeInfo {
+                name: "MOV H,M",
+                len: 1,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+            Opcode::MOV_L_M => OpcodeInfo {
+                name: "MOV L,M",
+                len: 1,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+
+            Opcode::MOV_M_A => OpcodeInfo {
+                name: "MOV M,A",
+                len: 1,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+            Opcode::MOV_M_B => OpcodeInfo {
+                name: "MOV M,B",
+                len: 1,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+            Opcode::MOV_M_C => OpcodeInfo {
+                name: "MOV M,C",
+                len: 1,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+            Opcode::MOV_M_D => OpcodeInfo {
+                name: "MOV M,D",
+                len: 1,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+            Opcode::MOV_M_E => OpcodeInfo {
+                name: "MOV M,E",
+                len: 1,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+            Opcode::MOV_M_H => OpcodeInfo {
+                name: "MOV M,H",
+                len: 1,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+            Opcode::MOV_M_L => OpcodeInfo {
+                name: "MOV M,L",
+                len: 1,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+
+            Opcode::MVI_A => OpcodeInfo {
+                name: "MVI A,",
+                len: 2,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+            Opcode::MVI_B => OpcodeInfo {
+                name: "MVI B,",
+                len: 2,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+            Opcode::MVI_C => OpcodeInfo {
+                name: "MVI C,",
+                len: 2,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+            Opcode::MVI_D => OpcodeInfo {
+                name: "MVI D,",
+                len: 2,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+            Opcode::MVI_E => OpcodeInfo {
+                name: "MVI E,",
+                len: 2,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+            Opcode::MVI_H => OpcodeInfo {
+                name: "MVI H,",
+                len: 2,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+            Opcode::MVI_L => OpcodeInfo {
+                name: "MVI L,",
+                len: 2,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+            Opcode::MVI_M => OpcodeInfo {
+                name: "MVI M,",
+                len: 2,
+                t_per_m: [Some(4), Some(3), Some(3), None, None],
+            },
+
+            Opcode::LXI_B => OpcodeInfo {
+                name: "LXI B,",
+                len: 3,
+                t_per_m: [Some(4), Some(3), Some(3), None, None],
+            },
+            Opcode::LXI_D => OpcodeInfo {
+                name: "LXI D,",
+                len: 3,
+                t_per_m: [Some(4), Some(3), Some(3), None, None],
+            },
+            Opcode::LXI_H => OpcodeInfo {
+                name: "LXI H,",
+                len: 3,
+                t_per_m: [Some(4), Some(3), Some(3), None, None],
+            },
+            Opcode::LXI_SP => OpcodeInfo {
+                name: "LXI SP,",
+                len: 3,
+                t_per_m: [Some(4), Some(3), Some(3), None, None],
+            },
+
+            Opcode::LDA => OpcodeInfo {
+                name: "LDA ",
+                len: 3,
+                t_per_m: [Some(4), Some(3), Some(3), Some(3), None],
+            },
+            Opcode::STA => OpcodeInfo {
+                name: "STA ",
+                len: 3,
+                t_per_m: [Some(4), Some(3), Some(3), Some(3), None],
+            },
+            Opcode::LHLD => OpcodeInfo {
+                name: "LHLD ",
+                len: 3,
+                t_per_m: [Some(4), Some(3), Some(3), Some(3), Some(3)],
+            },
+            Opcode::SHLD => OpcodeInfo {
+                name: "SHLD ",
+                len: 3,
+                t_per_m: [Some(4), Some(3), Some(3), Some(3), Some(3)],
+            },
+
+            Opcode::LDAX_B => OpcodeInfo {
+                name: "LDAX B",
+                len: 1,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+            Opcode::LDAX_D => OpcodeInfo {
+                name: "LDAX D",
+                len: 1,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+
+            Opcode::STAX_B => OpcodeInfo {
+                name: "STAX B",
+                len: 1,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+            Opcode::STAX_D => OpcodeInfo {
+                name: "STAX D",
+                len: 1,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+
+            Opcode::XCHG => OpcodeInfo {
+                name: "XCHG",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+
+            Opcode::ADD_A => OpcodeInfo {
+                name: "ADD A",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::ADD_B => OpcodeInfo {
+                name: "ADD B",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::ADD_C => OpcodeInfo {
+                name: "ADD C",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::ADD_D => OpcodeInfo {
+                name: "ADD D",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::ADD_E => OpcodeInfo {
+                name: "ADD E",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::ADD_H => OpcodeInfo {
+                name: "ADD H",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::ADD_L => OpcodeInfo {
+                name: "ADD L",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::ADD_M => OpcodeInfo {
+                name: "ADD M",
+                len: 1,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+
+            Opcode::ADI => OpcodeInfo {
+                name: "ADI ",
+                len: 2,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+
+            Opcode::ADC_A => OpcodeInfo {
+                name: "ADC A",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::ADC_B => OpcodeInfo {
+                name: "ADC B",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::ADC_C => OpcodeInfo {
+                name: "ADC C",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::ADC_D => OpcodeInfo {
+                name: "ADC D",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::ADC_E => OpcodeInfo {
+                name: "ADC E",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::ADC_H => OpcodeInfo {
+                name: "ADC H",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::ADC_L => OpcodeInfo {
+                name: "ADC L",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::ADC_M => OpcodeInfo {
+                name: "ADC M",
+                len: 1,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+
+            Opcode::ACI => OpcodeInfo {
+                name: "ACI ",
+                len: 2,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+
+            Opcode::SUB_A => OpcodeInfo {
+                name: "SUB A",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::SUB_B => OpcodeInfo {
+                name: "SUB B",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::SUB_C => OpcodeInfo {
+                name: "SUB C",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::SUB_D => OpcodeInfo {
+                name: "SUB D",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::SUB_E => OpcodeInfo {
+                name: "SUB E",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::SUB_H => OpcodeInfo {
+                name: "SUB H",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::SUB_L => OpcodeInfo {
+                name: "SUB L",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::SUB_M => OpcodeInfo {
+                name: "SUB M",
+                len: 1,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+
+            Opcode::SUI => OpcodeInfo {
+                name: "SUI ",
+                len: 2,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+
+            Opcode::SBB_A => OpcodeInfo {
+                name: "SBB A",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::SBB_B => OpcodeInfo {
+                name: "SBB B",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::SBB_C => OpcodeInfo {
+                name: "SBB C",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::SBB_D => OpcodeInfo {
+                name: "SBB D",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::SBB_E => OpcodeInfo {
+                name: "SBB E",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::SBB_H => OpcodeInfo {
+                name: "SBB H",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::SBB_L => OpcodeInfo {
+                name: "SBB L",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::SBB_M => OpcodeInfo {
+                name: "SBB M",
+                len: 1,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+
+            Opcode::SBI => OpcodeInfo {
+                name: "SBI ",
+                len: 2,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+
+            Opcode::INR_A => OpcodeInfo {
+                name: "INR A",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::INR_B => OpcodeInfo {
+                name: "INR B",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::INR_C => OpcodeInfo {
+                name: "INR C",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::INR_D => OpcodeInfo {
+                name: "INR D",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::INR_E => OpcodeInfo {
+                name: "INR E",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::INR_H => OpcodeInfo {
+                name: "INR H",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::INR_L => OpcodeInfo {
+                name: "INR L",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::INR_M => OpcodeInfo {
+                name: "INR M",
+                len: 1,
+                t_per_m: [Some(4), Some(3), Some(3), None, None],
+            },
+
+            Opcode::DCR_A => OpcodeInfo {
+                name: "DCR A",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::DCR_B => OpcodeInfo {
+                name: "DCR B",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::DCR_C => OpcodeInfo {
+                name: "DCR C",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::DCR_D => OpcodeInfo {
+                name: "DCR D",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::DCR_E => OpcodeInfo {
+                name: "DCR E",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::DCR_H => OpcodeInfo {
+                name: "DCR H",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::DCR_L => OpcodeInfo {
+                name: "DCR L",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::DCR_M => OpcodeInfo {
+                name: "DCR M",
+                len: 1,
+                t_per_m: [Some(4), Some(3), Some(3), None, None],
+            },
+
+            Opcode::INX_B => OpcodeInfo {
+                name: "INX B",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(6), None, None, None, None],
+            },
+            Opcode::INX_D => OpcodeInfo {
+                name: "INX D",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(6), None, None, None, None],
+            },
+            Opcode::INX_H => OpcodeInfo {
+                name: "INX H",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(6), None, None, None, None],
+            },
+            Opcode::INX_SP => OpcodeInfo {
+                name: "INX SP",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(6), None, None, None, None],
+            },
+
+            Opcode::DCX_B => OpcodeInfo {
+                name: "DCX B",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(6), None, None, None, None],
+            },
+            Opcode::DCX_D => OpcodeInfo {
+                name: "DCX D",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(6), None, None, None, None],
+            },
+            Opcode::DCX_H => OpcodeInfo {
+                name: "DCX H",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(6), None, None, None, None],
+            },
+            Opcode::DCX_SP => OpcodeInfo {
+                name: "DCX SP",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(6), None, None, None, None],
+            },
+
+            Opcode::DAD_B => OpcodeInfo {
+                name: "DAD B",
+                len: 1,
+                t_per_m: [Some(4), Some(3), Some(3), None, None],
+            },
+            Opcode::DAD_D => OpcodeInfo {
+                name: "DAD D",
+                len: 1,
+                t_per_m: [Some(4), Some(3), Some(3), None, None],
+            },
+            Opcode::DAD_H => OpcodeInfo {
+                name: "DAD H",
+                len: 1,
+                t_per_m: [Some(4), Some(3), Some(3), None, None],
+            },
+            Opcode::DAD_SP => OpcodeInfo {
+                name: "DAD SP",
+                len: 1,
+                t_per_m: [Some(4), Some(3), Some(3), None, None],
+            },
+
+            Opcode::DAA => OpcodeInfo {
+                name: "DAA",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+
+            Opcode::ANA_A => OpcodeInfo {
+                name: "ANA A",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::ANA_B => OpcodeInfo {
+                name: "ANA B",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::ANA_C => OpcodeInfo {
+                name: "ANA C",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::ANA_D => OpcodeInfo {
+                name: "ANA D",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::ANA_E => OpcodeInfo {
+                name: "ANA E",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::ANA_H => OpcodeInfo {
+                name: "ANA H",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::ANA_L => OpcodeInfo {
+                name: "ANA L",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::ANA_M => OpcodeInfo {
+                name: "ANA M",
+                len: 1,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+
+            Opcode::ANI => OpcodeInfo {
+                name: "ANI ",
+                len: 2,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+
+            Opcode::XRA_A => OpcodeInfo {
+                name: "XRA A",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::XRA_B => OpcodeInfo {
+                name: "XRA B",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::XRA_C => OpcodeInfo {
+                name: "XRA C",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::XRA_D => OpcodeInfo {
+                name: "XRA D",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::XRA_E => OpcodeInfo {
+                name: "XRA E",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::XRA_H => OpcodeInfo {
+                name: "XRA H",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::XRA_L => OpcodeInfo {
+                name: "XRA L",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::XRA_M => OpcodeInfo {
+                name: "XRA M",
+                len: 1,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+
+            Opcode::XRI => OpcodeInfo {
+                name: "XRI ",
+                len: 2,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+
+            Opcode::ORA_A => OpcodeInfo {
+                name: "ORA A",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::ORA_B => OpcodeInfo {
+                name: "ORA B",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::ORA_C => OpcodeInfo {
+                name: "ORA C",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::ORA_D => OpcodeInfo {
+                name: "ORA D",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::ORA_E => OpcodeInfo {
+                name: "ORA E",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::ORA_H => OpcodeInfo {
+                name: "ORA H",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::ORA_L => OpcodeInfo {
+                name: "ORA L",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::ORA_M => OpcodeInfo {
+                name: "ORA M",
+                len: 1,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+
+            Opcode::ORI => OpcodeInfo {
+                name: "ORI ",
+                len: 2,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+
+            Opcode::CMP_A => OpcodeInfo {
+                name: "CMP A",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::CMP_B => OpcodeInfo {
+                name: "CMP B",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::CMP_C => OpcodeInfo {
+                name: "CMP C",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::CMP_D => OpcodeInfo {
+                name: "CMP D",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::CMP_E => OpcodeInfo {
+                name: "CMP E",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::CMP_H => OpcodeInfo {
+                name: "CMP H",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::CMP_L => OpcodeInfo {
+                name: "CMP L",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::CMP_M => OpcodeInfo {
+                name: "CMP M",
+                len: 1,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+
+            Opcode::CPI => OpcodeInfo {
+                name: "CPI ",
+                len: 2,
+                t_per_m: [Some(4), Some(3), None, None, None],
+            },
+            Opcode::RLC => OpcodeInfo {
+                name: "RLC",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::RRC => OpcodeInfo {
+                name: "RRC",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::RAL => OpcodeInfo {
+                name: "RAL",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::RAR => OpcodeInfo {
+                name: "RAR",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::CMA => OpcodeInfo {
+                name: "CMA",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::CMC => OpcodeInfo {
+                name: "CMC",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::STC => OpcodeInfo {
+                name: "STC",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::JMP => OpcodeInfo {
+                name: "JMP ",
+                len: 3,
+                t_per_m: [Some(4), Some(3), Some(3), None, None],
+            },
+
+            Opcode::JNZ => OpcodeInfo {
+                name: "JNZ ",
+                len: 3,
+                t_per_m: [Some(4), Some(3), Some(3), None, None],
+            },
+            Opcode::JZ => OpcodeInfo {
+                name: "JZ ",
+                len: 3,
+                t_per_m: [Some(4), Some(3), Some(3), None, None],
+            },
+            Opcode::JNC => OpcodeInfo {
+                name: "JNC ",
+                len: 3,
+                t_per_m: [Some(4), Some(3), Some(3), None, None],
+            },
+            Opcode::JC => OpcodeInfo {
+                name: "JC ",
+                len: 3,
+                t_per_m: [Some(4), Some(3), Some(3), None, None],
+            },
+            Opcode::JPO => OpcodeInfo {
+                name: "JPO ",
+                len: 3,
+                t_per_m: [Some(4), Some(3), Some(3), None, None],
+            },
+            Opcode::JPE => OpcodeInfo {
+                name: "JPE ",
+                len: 3,
+                t_per_m: [Some(4), Some(3), Some(3), None, None],
+            },
+            Opcode::JP => OpcodeInfo {
+                name: "JP ",
+                len: 3,
+                t_per_m: [Some(4), Some(3), Some(3), None, None],
+            },
+            Opcode::JM => OpcodeInfo {
+                name: "JM ",
+                len: 3,
+                t_per_m: [Some(4), Some(3), Some(3), None, None],
+            },
+
+            Opcode::CALL => OpcodeInfo {
+                name: "CALL ",
+                len: 3,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(4), Some(3), Some(3), Some(3), Some(4)],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), Some(3), Some(3), Some(4), Some(4)],
+            },
+
+            Opcode::CNZ => OpcodeInfo {
+                name: "CNZ ",
+                len: 3,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(4), Some(3), Some(4), Some(3), Some(3)],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), Some(5), Some(3), Some(3), Some(3)],
+            },
+            Opcode::CZ => OpcodeInfo {
+                name: "CZ ",
+                len: 3,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(4), Some(3), Some(4), Some(3), Some(3)],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), Some(5), Some(3), Some(3), Some(3)],
+            },
+            Opcode::CNC => OpcodeInfo {
+                name: "CNC ",
+                len: 3,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(4), Some(3), Some(4), Some(3), Some(3)],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), Some(5), Some(3), Some(3), Some(3)],
+            },
+            Opcode::CC => OpcodeInfo {
+                name: "CC ",
+                len: 3,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(4), Some(3), Some(4), Some(3), Some(3)],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), Some(5), Some(3), Some(3), Some(3)],
+            },
+            Opcode::CPO => OpcodeInfo {
+                name: "CPO ",
+                len: 3,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(4), Some(3), Some(4), Some(3), Some(3)],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), Some(5), Some(3), Some(3), Some(3)],
+            },
+            Opcode::CPE => OpcodeInfo {
+                name: "CPE ",
+                len: 3,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(4), Some(3), Some(4), Some(3), Some(3)],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), Some(5), Some(3), Some(3), Some(3)],
+            },
+            Opcode::CP => OpcodeInfo {
+                name: "CP ",
+                len: 3,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(4), Some(3), Some(4), Some(3), Some(3)],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), Some(5), Some(3), Some(3), Some(3)],
+            },
+            Opcode::CM => OpcodeInfo {
+                name: "CM ",
+                len: 3,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(4), Some(3), Some(4), Some(3), Some(3)],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), Some(5), Some(3), Some(3), Some(3)],
+            },
+
+            Opcode::RET => OpcodeInfo {
+                name: "RET",
+                len: 1,
+                t_per_m: [Some(4), Some(3), Some(3), None, None],
+            },
+
+            Opcode::RNZ => OpcodeInfo {
+                name: "RNZ",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), Some(3), Some(3), None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(6), Some(3), Some(3), None, None],
+            },
+            Opcode::RZ => OpcodeInfo {
+                name: "RZ",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), Some(3), Some(3), None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(6), Some(3), Some(3), None, None],
+            },
+            Opcode::RNC => OpcodeInfo {
+                name: "RNC",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), Some(3), Some(3), None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(6), Some(3), Some(3), None, None],
+            },
+            Opcode::RC => OpcodeInfo {
+                name: "RC",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), Some(3), Some(3), None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(6), Some(3), Some(3), None, None],
+            },
+            Opcode::RPO => OpcodeInfo {
+                name: "RPO",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), Some(3), Some(3), None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(6), Some(3), Some(3), None, None],
+            },
+            Opcode::RPE => OpcodeInfo {
+                name: "RPE",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), Some(3), Some(3), None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(6), Some(3), Some(3), None, None],
+            },
+            Opcode::RP => OpcodeInfo {
+                name: "RP",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), Some(3), Some(3), None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(6), Some(3), Some(3), None, None],
+            },
+            Opcode::RM => OpcodeInfo {
+                name: "RM",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), Some(3), Some(3), None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(6), Some(3), Some(3), None, None],
+            },
+
+            Opcode::RST_0 => OpcodeInfo {
+                name: "RST 0",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(4), Some(3), Some(4), None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), Some(4), Some(4), None, None],
+            },
+            Opcode::RST_1 => OpcodeInfo {
+                name: "RST 1",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(4), Some(3), Some(4), None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), Some(4), Some(4), None, None],
+            },
+            Opcode::RST_2 => OpcodeInfo {
+                name: "RST 2",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(4), Some(3), Some(4), None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), Some(4), Some(4), None, None],
+            },
+            Opcode::RST_3 => OpcodeInfo {
+                name: "RST 3",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(4), Some(3), Some(4), None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), Some(4), Some(4), None, None],
+            },
+            Opcode::RST_4 => OpcodeInfo {
+                name: "RST 4",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(4), Some(3), Some(4), None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), Some(4), Some(4), None, None],
+            },
+            Opcode::RST_5 => OpcodeInfo {
+                name: "RST 5",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(4), Some(3), Some(4), None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), Some(4), Some(4), None, None],
+            },
+            Opcode::RST_6 => OpcodeInfo {
+                name: "RST 6",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(4), Some(3), Some(4), None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), Some(4), Some(4), None, None],
+            },
+            Opcode::RST_7 => OpcodeInfo {
+                name: "RST 7",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(4), Some(3), Some(4), None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), Some(4), Some(4), None, None],
+            },
+
+            Opcode::PCHL => OpcodeInfo {
+                name: "PCHL",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(6), None, None, None, None],
+            },
+
+            Opcode::PUSH_B => OpcodeInfo {
+                name: "PUSH B",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(4), Some(3), Some(4), None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), Some(4), Some(5), None, None],
+            },
+            Opcode::PUSH_D => OpcodeInfo {
+                name: "PUSH D",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(4), Some(3), Some(4), None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), Some(4), Some(5), None, None],
+            },
+            Opcode::PUSH_H => OpcodeInfo {
+                name: "PUSH H",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(4), Some(3), Some(4), None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), Some(4), Some(5), None, None],
+            },
+            Opcode::PUSH_PSW => OpcodeInfo {
+                name: "PUSH PSW",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(4), Some(3), Some(4), None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), Some(4), Some(5), None, None],
+            },
+
+            Opcode::POP_B => OpcodeInfo {
+                name: "POP B",
+                len: 1,
+                t_per_m: [Some(4), Some(3), Some(3), None, None],
+            },
+            Opcode::POP_D => OpcodeInfo {
+                name: "POP D",
+                len: 1,
+                t_per_m: [Some(4), Some(3), Some(3), None, None],
+            },
+            Opcode::POP_H => OpcodeInfo {
+                name: "POP H",
+                len: 1,
+                t_per_m: [Some(4), Some(3), Some(3), None, None],
+            },
+            Opcode::POP_PSW => OpcodeInfo {
+                name: "POP PSW",
+                len: 1,
+                t_per_m: [Some(4), Some(3), Some(3), None, None],
+            },
+
+            Opcode::XTHL => OpcodeInfo {
+                name: "XTHL",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(4), Some(3), Some(3), Some(4), Some(4)],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(4), Some(3), Some(3), Some(3), Some(3)],
+            },
+            Opcode::SPHL => OpcodeInfo {
+                name: "SPHL",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(5), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(6), None, None, None, None],
+            },
+            Opcode::IN => OpcodeInfo {
+                name: "IN ",
+                len: 2,
+                t_per_m: [Some(4), Some(3), Some(3), None, None],
+            },
+            Opcode::OUT => OpcodeInfo {
+                name: "OUT ",
+                len: 2,
+                t_per_m: [Some(4), Some(3), Some(3), None, None],
+            },
+            Opcode::EI => OpcodeInfo {
+                name: "EI",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::DI => OpcodeInfo {
+                name: "DI",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::HLT => OpcodeInfo {
+                name: "HLT",
+                len: 1,
+                #[cfg(feature = "i8080")]
+                t_per_m: [Some(7), None, None, None, None],
+                #[cfg(feature = "i8085")]
+                t_per_m: [Some(5), None, None, None, None],
+            },
+            Opcode::NOP => OpcodeInfo {
+                name: "NOP",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+
+            Opcode::UNDEF_1 => OpcodeInfo {
+                name: "UNDEF 1",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::UNDEF_2 => OpcodeInfo {
+                name: "UNDEF 2",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::UNDEF_3 => OpcodeInfo {
+                name: "UNDEF 3",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::UNDEF_4 => OpcodeInfo {
+                name: "UNDEF 4",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::UNDEF_5 => OpcodeInfo {
+                name: "UNDEF 5",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::UNDEF_6 => OpcodeInfo {
+                name: "UNDEF 6",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::UNDEF_7 => OpcodeInfo {
+                name: "UNDEF 7",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::UNDEF_8 => OpcodeInfo {
+                name: "UNDEF 8",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::UNDEF_9 => OpcodeInfo {
+                name: "UNDEF 9",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::UNDEF_10 => OpcodeInfo {
+                name: "UNDEF 10",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::UNDEF_11 => OpcodeInfo {
+                name: "UNDEF 11",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
+            Opcode::UNDEF_12 => OpcodeInfo {
+                name: "UNDEF 12",
+                len: 1,
+                t_per_m: [Some(4), None, None, None, None],
+            },
         }
     }
 }
