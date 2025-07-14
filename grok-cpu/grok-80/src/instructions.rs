@@ -2,44 +2,44 @@ use crate::{BusHandler, Cpu, Flags, IffState, Register};
 
 // These represent shared micro_ops between multiple instructions
 impl<T: BusHandler> Cpu<T> {
-    fn fetch_operand(&mut self, idx: usize) {
-        self.wz[idx] = self.bus.mem_read(self.pc);
+    fn fetch_operand(&mut self, bus: &mut T, idx: usize) {
+        self.wz[idx] = bus.mem_read(self.pc);
         self.pc += 1;
     }
 
-    fn mov_r_m_m2(&mut self, dest: Register) {
+    fn mov_r_m_m2(&mut self, bus: &mut T, dest: Register) {
         let addr = self.get_reg_pair(Register::H, Register::L);
-        let val = self.bus.mem_read(addr);
+        let val = bus.mem_read(addr);
         self.gpr[dest] = val;
     }
 
-    fn mov_m_r_m2(&mut self, src: Register) {
+    fn mov_m_r_m2(&mut self, bus: &mut T, src: Register) {
         let addr = self.get_reg_pair(Register::H, Register::L);
         let val = self.gpr[src];
-        self.bus.mem_write(addr, val);
+        bus.mem_write(addr, val);
     }
 
-    fn mvi_r_m2(&mut self, dest: Register) {
-        let imm = self.bus.mem_read(self.pc);
+    fn mvi_r_m2(&mut self, bus: &mut T, dest: Register) {
+        let imm = bus.mem_read(self.pc);
         self.pc += 1;
         self.gpr[dest] = imm;
     }
 
-    fn lxi_r_m3(&mut self, dest1: Register, dest2: Register) {
-        self.fetch_operand(1);
+    fn lxi_r_m3(&mut self, bus: &mut T, dest1: Register, dest2: Register) {
+        self.fetch_operand(bus, 1);
         let val = u16::from_le_bytes(self.wz);
         self.set_reg_pair(dest1, dest2, val);
     }
 
-    fn ldax_r_m2(&mut self, src1: Register, src2: Register) {
+    fn ldax_r_m2(&mut self, bus: &mut T, src1: Register, src2: Register) {
         let addr = self.get_reg_pair(src1, src2);
-        self.gpr[Register::A] = self.bus.mem_read(addr);
+        self.gpr[Register::A] = bus.mem_read(addr);
     }
 
-    fn stax_r_m2(&mut self, src1: Register, src2: Register) {
+    fn stax_r_m2(&mut self, bus: &mut T, src1: Register, src2: Register) {
         let addr = self.get_reg_pair(src1, src2);
         let val = self.gpr[Register::A];
-        self.bus.mem_write(addr, val);
+        bus.mem_write(addr, val);
     }
 
     // DAD R takes 3 M-Cycles (1: Fetch, 2: Add low byte, 3: Add high byte)
@@ -55,19 +55,19 @@ impl<T: BusHandler> Cpu<T> {
     }
 
     #[cfg(feature = "i8080")]
-    fn jcc_m2(&mut self, _flag: Flags, _cmp: bool) {
-        self.fetch_operand(0);
+    fn jcc_m2(&mut self, bus: &mut T, _flag: Flags, _cmp: bool) {
+        self.fetch_operand(bus, 0);
     }
 
     // Most variants are smart and only take a 3rd M-cycle (fetch high byte) if branch taken
     #[cfg(not(feature = "i8080"))]
-    fn jcc_m2(&mut self, flag: Flags, cmp: bool) {
-        self.fetch_operand(0);
+    fn jcc_m2(&mut self, bus: &mut T, flag: Flags, cmp: bool) {
+        self.fetch_operand(bus, 0);
 
         if self.flags.contains(flag) == cmp {
             // M3: Fetch high byte of target addr and jump
-            self.pipeline.push_back(|cpu| {
-                cpu.fetch_operand(1);
+            self.pipeline.push_back(|cpu, bus| {
+                cpu.fetch_operand(bus, 1);
                 let addr = u16::from_le_bytes(cpu.wz);
                 cpu.pc = addr;
             });
@@ -78,8 +78,8 @@ impl<T: BusHandler> Cpu<T> {
 
     // Intel 8080 is dumb and always takes a 3rd M-cycle (fetch high byte) regardless if branch taken
     #[cfg(feature = "i8080")]
-    fn jcc_m3(&mut self, flag: Flags, cmp: bool) {
-        self.fetch_operand(1);
+    fn jcc_m3(&mut self, bus: &mut T, flag: Flags, cmp: bool) {
+        self.fetch_operand(bus, 1);
 
         if self.flags.contains(flag) == cmp {
             let addr = u16::from_le_bytes(self.wz);
@@ -87,38 +87,39 @@ impl<T: BusHandler> Cpu<T> {
         }
     }
 
-    fn call_m4(&mut self) {
+    fn call_m4(&mut self, bus: &mut T) {
         self.sp = self.sp.wrapping_sub(1);
         let val = (self.pc >> 8) as u8;
-        self.bus.mem_write(self.sp, val);
+        bus.mem_write(self.sp, val);
     }
 
-    fn call_m5(&mut self) {
+    fn call_m5(&mut self, bus: &mut T) {
         self.sp = self.sp.wrapping_sub(1);
         let val = self.pc as u8;
-        self.bus.mem_write(self.sp, val);
+        bus.mem_write(self.sp, val);
         self.pc = u16::from_le_bytes(self.wz);
     }
 
     #[cfg(feature = "i8080")]
-    fn ccc_m2(&mut self, _flag: Flags, _cmp: bool) {
-        self.fetch_operand(0);
+    fn ccc_m2(&mut self, bus: &mut T, _flag: Flags, _cmp: bool) {
+        self.fetch_operand(bus, 0);
     }
 
     // Most variants are smart and only take a 3rd M-cycle (fetch high byte) if branch taken
     #[cfg(not(feature = "i8080"))]
-    fn ccc_m2(&mut self, flag: Flags, cmp: bool) {
-        self.fetch_operand(0);
+    fn ccc_m2(&mut self, bus: &mut T, flag: Flags, cmp: bool) {
+        self.fetch_operand(bus, 0);
 
         if self.flags.contains(flag) == cmp {
             // M3: Fetch high byte of target addr
-            self.pipeline.push_back(|cpu| cpu.fetch_operand(1));
+            self.pipeline
+                .push_back(|cpu, bus| cpu.fetch_operand(bus, 1));
 
             // M4: Push high byte of return addr
-            self.pipeline.push_back(|cpu| cpu.call_m4());
+            self.pipeline.push_back(|cpu, bus| cpu.call_m4(bus));
 
             // M5: Push low byte of return addr, then jump
-            self.pipeline.push_back(|cpu| cpu.call_m5());
+            self.pipeline.push_back(|cpu, bus| cpu.call_m5(bus));
         } else {
             self.pc = self.pc.wrapping_add(1);
         }
@@ -126,47 +127,47 @@ impl<T: BusHandler> Cpu<T> {
 
     // Intel 8080 is dumb and always takes a 3rd M-cycle (fetch high byte) regardless if branch taken
     #[cfg(feature = "i8080")]
-    fn ccc_m3(&mut self, flag: Flags, cmp: bool) {
-        self.fetch_operand(1);
+    fn ccc_m3(&mut self, bus: &mut T, flag: Flags, cmp: bool) {
+        self.fetch_operand(bus, 1);
 
         if self.flags.contains(flag) == cmp {
             // M4: Push high byte of return addr
-            self.pipeline.push_back(|cpu| cpu.call_m4());
+            self.pipeline.push_back(|cpu, bus| cpu.call_m4(bus));
 
             // M5: Push low byte of return addr, then jump
-            self.pipeline.push_back(|cpu| cpu.call_m5());
+            self.pipeline.push_back(|cpu, bus| cpu.call_m5(bus));
         }
     }
 
-    fn ret_m2(&mut self) {
-        self.wz[0] = self.bus.mem_read(self.sp);
+    fn ret_m2(&mut self, bus: &mut T) {
+        self.wz[0] = bus.mem_read(self.sp);
         self.sp = self.sp.wrapping_add(1);
     }
 
-    fn ret_m3(&mut self) {
-        self.wz[1] = self.bus.mem_read(self.sp);
+    fn ret_m3(&mut self, bus: &mut T) {
+        self.wz[1] = bus.mem_read(self.sp);
         self.sp = self.sp.wrapping_add(1);
         self.pc = u16::from_le_bytes(self.wz);
     }
 
-    fn rst_n_m2(&mut self) {
+    fn rst_n_m2(&mut self, bus: &mut T) {
         self.sp = self.sp.wrapping_sub(1);
-        self.bus.mem_write(self.sp, (self.pc >> 8) as u8);
+        bus.mem_write(self.sp, (self.pc >> 8) as u8);
     }
 
-    fn rst_n_m3(&mut self, n: u16) {
+    fn rst_n_m3(&mut self, bus: &mut T, n: u16) {
         self.sp = self.sp.wrapping_sub(1);
-        self.bus.mem_write(self.sp, self.pc as u8);
+        bus.mem_write(self.sp, self.pc as u8);
         self.pc = n * 0x08;
     }
 
-    fn push_r(&mut self, src: Register) {
+    fn push_r(&mut self, bus: &mut T, src: Register) {
         self.sp = self.sp.wrapping_sub(1);
-        self.bus.mem_write(self.sp, self.gpr[src]);
+        bus.mem_write(self.sp, self.gpr[src]);
     }
 
-    fn pop_r(&mut self, dest: Register) {
-        self.gpr[dest] = self.bus.mem_read(self.sp);
+    fn pop_r(&mut self, bus: &mut T, dest: Register) {
+        self.gpr[dest] = bus.mem_read(self.sp);
         self.sp = self.sp.wrapping_add(1);
     }
 }
@@ -179,254 +180,288 @@ impl<T: BusHandler> Cpu<T> {
 
     pub(crate) fn mov_a_m(&mut self) {
         // M2: Load value from memory
-        self.pipeline.push_back(|cpu| cpu.mov_r_m_m2(Register::A));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.mov_r_m_m2(bus, Register::A));
     }
 
     pub(crate) fn mov_b_m(&mut self) {
         // M2: Load value from memory
-        self.pipeline.push_back(|cpu| cpu.mov_r_m_m2(Register::B));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.mov_r_m_m2(bus, Register::B));
     }
 
     pub(crate) fn mov_c_m(&mut self) {
         // M2: Load value from memory
-        self.pipeline.push_back(|cpu| cpu.mov_r_m_m2(Register::C));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.mov_r_m_m2(bus, Register::C));
     }
 
     pub(crate) fn mov_d_m(&mut self) {
         // M2: Load value from memory
-        self.pipeline.push_back(|cpu| cpu.mov_r_m_m2(Register::D));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.mov_r_m_m2(bus, Register::D));
     }
 
     pub(crate) fn mov_e_m(&mut self) {
         // M2: Load value from memory
-        self.pipeline.push_back(|cpu| cpu.mov_r_m_m2(Register::E));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.mov_r_m_m2(bus, Register::E));
     }
 
     pub(crate) fn mov_h_m(&mut self) {
         // M2: Load value from memory
-        self.pipeline.push_back(|cpu| cpu.mov_r_m_m2(Register::H));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.mov_r_m_m2(bus, Register::H));
     }
 
     pub(crate) fn mov_l_m(&mut self) {
         // M2: Load value from memory
-        self.pipeline.push_back(|cpu| cpu.mov_r_m_m2(Register::L));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.mov_r_m_m2(bus, Register::L));
     }
 
     pub(crate) fn mov_m_a(&mut self) {
         // M2: Store value in memory
-        self.pipeline.push_back(|cpu| cpu.mov_m_r_m2(Register::A));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.mov_m_r_m2(bus, Register::A));
     }
 
     pub(crate) fn mov_m_b(&mut self) {
         // M2: Store value in memory
-        self.pipeline.push_back(|cpu| cpu.mov_m_r_m2(Register::B));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.mov_m_r_m2(bus, Register::B));
     }
 
     pub(crate) fn mov_m_c(&mut self) {
         // M2: Store value in memory
-        self.pipeline.push_back(|cpu| cpu.mov_m_r_m2(Register::C));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.mov_m_r_m2(bus, Register::C));
     }
 
     pub(crate) fn mov_m_d(&mut self) {
         // M2: Store value in memory
-        self.pipeline.push_back(|cpu| cpu.mov_m_r_m2(Register::D));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.mov_m_r_m2(bus, Register::D));
     }
 
     pub(crate) fn mov_m_e(&mut self) {
         // M2: Store value in memory
-        self.pipeline.push_back(|cpu| cpu.mov_m_r_m2(Register::E));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.mov_m_r_m2(bus, Register::E));
     }
 
     pub(crate) fn mov_m_h(&mut self) {
         // M2: Store value in memory
-        self.pipeline.push_back(|cpu| cpu.mov_m_r_m2(Register::H));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.mov_m_r_m2(bus, Register::H));
     }
 
     pub(crate) fn mov_m_l(&mut self) {
         // M2: Store value in memory
-        self.pipeline.push_back(|cpu| cpu.mov_m_r_m2(Register::L));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.mov_m_r_m2(bus, Register::L));
     }
 
     pub(crate) fn mvi_a(&mut self) {
         // M2: Fetch immediate value
-        self.pipeline.push_back(|cpu| cpu.mvi_r_m2(Register::A));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.mvi_r_m2(bus, Register::A));
     }
 
     pub(crate) fn mvi_b(&mut self) {
         // M2: Fetch immediate value
-        self.pipeline.push_back(|cpu| cpu.mvi_r_m2(Register::B));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.mvi_r_m2(bus, Register::B));
     }
 
     pub(crate) fn mvi_c(&mut self) {
         // M2: Fetch immediate value
-        self.pipeline.push_back(|cpu| cpu.mvi_r_m2(Register::C));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.mvi_r_m2(bus, Register::C));
     }
 
     pub(crate) fn mvi_d(&mut self) {
         // M2: Fetch immediate value
-        self.pipeline.push_back(|cpu| cpu.mvi_r_m2(Register::D));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.mvi_r_m2(bus, Register::D));
     }
 
     pub(crate) fn mvi_e(&mut self) {
         // M2: Fetch immediate value
-        self.pipeline.push_back(|cpu| cpu.mvi_r_m2(Register::E));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.mvi_r_m2(bus, Register::E));
     }
 
     pub(crate) fn mvi_h(&mut self) {
         // M2: Fetch immediate value
-        self.pipeline.push_back(|cpu| cpu.mvi_r_m2(Register::H));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.mvi_r_m2(bus, Register::H));
     }
 
     pub(crate) fn mvi_l(&mut self) {
         // M2: Fetch immediate value
-        self.pipeline.push_back(|cpu| cpu.mvi_r_m2(Register::L));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.mvi_r_m2(bus, Register::L));
     }
 
     pub(crate) fn mvi_m(&mut self) {
         // M2: Fetch immediate value
-        self.pipeline.push_back(|cpu| cpu.fetch_operand(0));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.fetch_operand(bus, 0));
 
         // M3: Store value in memory
-        self.pipeline.push_back(|cpu| {
+        self.pipeline.push_back(|cpu, bus| {
             let addr = cpu.get_reg_pair(Register::H, Register::L);
-            cpu.bus.mem_write(addr, cpu.wz[0]);
+            bus.mem_write(addr, cpu.wz[0]);
         });
     }
 
     pub(crate) fn lxi_b(&mut self) {
         // M2: Fetch low byte of immediate value
-        self.pipeline.push_back(|cpu| cpu.fetch_operand(0));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.fetch_operand(bus, 0));
 
         // M3: Fetch high byte of immediate value
         self.pipeline
-            .push_back(|cpu| cpu.lxi_r_m3(Register::B, Register::C));
+            .push_back(|cpu, bus| cpu.lxi_r_m3(bus, Register::B, Register::C));
     }
 
     pub(crate) fn lxi_d(&mut self) {
         // M2: Fetch low byte of immediate value
-        self.pipeline.push_back(|cpu| cpu.fetch_operand(0));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.fetch_operand(bus, 0));
 
         // M3: Fetch high byte of immediate value
         self.pipeline
-            .push_back(|cpu| cpu.lxi_r_m3(Register::D, Register::E));
+            .push_back(|cpu, bus| cpu.lxi_r_m3(bus, Register::D, Register::E));
     }
 
     pub(crate) fn lxi_h(&mut self) {
         // M2: Fetch low byte of immediate value
-        self.pipeline.push_back(|cpu| cpu.fetch_operand(0));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.fetch_operand(bus, 0));
 
         // M3: Fetch high byte of immediate value
         self.pipeline
-            .push_back(|cpu| cpu.lxi_r_m3(Register::H, Register::L));
+            .push_back(|cpu, bus| cpu.lxi_r_m3(bus, Register::H, Register::L));
     }
 
     pub(crate) fn lxi_sp(&mut self) {
         // M2: Fetch low byte of immediate value
-        self.pipeline.push_back(|cpu| cpu.fetch_operand(0));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.fetch_operand(bus, 0));
 
         // M3: Fetch high byte of immediate value
-        self.pipeline.push_back(|cpu| {
-            cpu.fetch_operand(1);
+        self.pipeline.push_back(|cpu, bus| {
+            cpu.fetch_operand(bus, 1);
             cpu.sp = u16::from_le_bytes(cpu.wz);
         });
     }
 
     pub(crate) fn lda(&mut self) {
         // M2: Fetch low byte of target addr
-        self.pipeline.push_back(|cpu| cpu.fetch_operand(0));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.fetch_operand(bus, 0));
 
         // M3: Fetch high byte of target addr
-        self.pipeline.push_back(|cpu| cpu.fetch_operand(1));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.fetch_operand(bus, 1));
 
         // M4: Load A from addr
-        self.pipeline.push_back(|cpu| {
+        self.pipeline.push_back(|cpu, bus| {
             let addr = u16::from_le_bytes(cpu.wz);
-            let val = cpu.bus.mem_read(addr);
+            let val = bus.mem_read(addr);
             cpu.gpr[Register::A] = val;
         });
     }
 
     pub(crate) fn sta(&mut self) {
         // M2: Fetch low byte of target addr
-        self.pipeline.push_back(|cpu| cpu.fetch_operand(0));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.fetch_operand(bus, 0));
 
         // M3: Fetch high byte of target addr
-        self.pipeline.push_back(|cpu| cpu.fetch_operand(1));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.fetch_operand(bus, 1));
 
         // M4: Store A at addr
-        self.pipeline.push_back(|cpu| {
+        self.pipeline.push_back(|cpu, bus| {
             let addr = u16::from_le_bytes(cpu.wz);
             let val = cpu.gpr[Register::A];
-            cpu.bus.mem_write(addr, val);
+            bus.mem_write(addr, val);
         });
     }
 
     pub(crate) fn lhld(&mut self) {
         // M2: Fetch low byte of target addr
-        self.pipeline.push_back(|cpu| cpu.fetch_operand(0));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.fetch_operand(bus, 0));
 
         // M3: Fetch high byte of target addr
-        self.pipeline.push_back(|cpu| cpu.fetch_operand(1));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.fetch_operand(bus, 1));
 
         // M4: Load L from addr
-        self.pipeline.push_back(|cpu| {
+        self.pipeline.push_back(|cpu, bus| {
             let addr = u16::from_le_bytes(cpu.wz);
-            let val = cpu.bus.mem_read(addr);
+            let val = bus.mem_read(addr);
             cpu.gpr[Register::L] = val;
         });
 
         // M5: Load H from addr + 1
-        self.pipeline.push_back(|cpu| {
+        self.pipeline.push_back(|cpu, bus| {
             let addr = u16::from_le_bytes(cpu.wz);
-            let val = cpu.bus.mem_read(addr.wrapping_add(1));
+            let val = bus.mem_read(addr.wrapping_add(1));
             cpu.gpr[Register::H] = val;
         });
     }
 
     pub(crate) fn shld(&mut self) {
         // M2: Fetch low byte of target addr
-        self.pipeline.push_back(|cpu| cpu.fetch_operand(0));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.fetch_operand(bus, 0));
 
         // M3: Fetch high byte of target addr
-        self.pipeline.push_back(|cpu| cpu.fetch_operand(1));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.fetch_operand(bus, 1));
 
         // M4: Store L at addr
-        self.pipeline.push_back(|cpu| {
+        self.pipeline.push_back(|cpu, bus| {
             let addr = u16::from_le_bytes(cpu.wz);
             let val = cpu.gpr[Register::L];
-            cpu.bus.mem_write(addr, val);
+            bus.mem_write(addr, val);
         });
 
         // M5: Store H at addr + 1
-        self.pipeline.push_back(|cpu| {
+        self.pipeline.push_back(|cpu, bus| {
             let addr = u16::from_le_bytes(cpu.wz);
             let val = cpu.gpr[Register::H];
-            cpu.bus.mem_write(addr.wrapping_add(1), val);
+            bus.mem_write(addr.wrapping_add(1), val);
         });
     }
 
     pub(crate) fn ldax_b(&mut self) {
         // M2: Load value from memory
         self.pipeline
-            .push_back(|cpu| cpu.ldax_r_m2(Register::B, Register::C));
+            .push_back(|cpu, bus| cpu.ldax_r_m2(bus, Register::B, Register::C));
     }
 
     pub(crate) fn ldax_d(&mut self) {
         // M2: Load value from memory
         self.pipeline
-            .push_back(|cpu| cpu.ldax_r_m2(Register::D, Register::E));
+            .push_back(|cpu, bus| cpu.ldax_r_m2(bus, Register::D, Register::E));
     }
 
     pub(crate) fn stax_b(&mut self) {
         // M2: Store value in memory
         self.pipeline
-            .push_back(|cpu| cpu.stax_r_m2(Register::B, Register::C));
+            .push_back(|cpu, bus| cpu.stax_r_m2(bus, Register::B, Register::C));
     }
 
     pub(crate) fn stax_d(&mut self) {
         // M2: Store value in memory
         self.pipeline
-            .push_back(|cpu| cpu.stax_r_m2(Register::D, Register::E));
+            .push_back(|cpu, bus| cpu.stax_r_m2(bus, Register::D, Register::E));
     }
 
     pub(crate) fn xchg(&mut self) {
@@ -441,9 +476,9 @@ impl<T: BusHandler> Cpu<T> {
 
     pub(crate) fn add_m(&mut self) {
         // M2: Load value from memory
-        self.pipeline.push_back(|cpu| {
+        self.pipeline.push_back(|cpu, bus| {
             let addr = cpu.get_reg_pair(Register::H, Register::L);
-            let val = cpu.bus.mem_read(addr);
+            let val = bus.mem_read(addr);
             cpu.update_flags_add(cpu.gpr[Register::A], val, false);
             cpu.gpr[Register::A] = cpu.gpr[Register::A].wrapping_add(val);
         });
@@ -451,8 +486,8 @@ impl<T: BusHandler> Cpu<T> {
 
     pub(crate) fn adi(&mut self) {
         // M2: Fetch immediate value
-        self.pipeline.push_back(|cpu| {
-            cpu.fetch_operand(0);
+        self.pipeline.push_back(|cpu, bus| {
+            cpu.fetch_operand(bus, 0);
             cpu.update_flags_add(cpu.gpr[Register::A], cpu.wz[0], false);
             cpu.gpr[Register::A] = cpu.gpr[Register::A].wrapping_add(cpu.wz[0]);
         });
@@ -468,9 +503,9 @@ impl<T: BusHandler> Cpu<T> {
 
     pub(crate) fn adc_m(&mut self) {
         // M2: Load value from memory
-        self.pipeline.push_back(|cpu| {
+        self.pipeline.push_back(|cpu, bus| {
             let addr = cpu.get_reg_pair(Register::H, Register::L);
-            let val = cpu.bus.mem_read(addr);
+            let val = bus.mem_read(addr);
             let carry = cpu.flags.contains(Flags::CY) as u8;
             cpu.update_flags_add(cpu.gpr[Register::A], val, true);
             cpu.gpr[Register::A] = cpu.gpr[Register::A].wrapping_add(val).wrapping_add(carry);
@@ -479,8 +514,8 @@ impl<T: BusHandler> Cpu<T> {
 
     pub(crate) fn aci(&mut self) {
         // M2: Fetch immediate value
-        self.pipeline.push_back(|cpu| {
-            cpu.fetch_operand(0);
+        self.pipeline.push_back(|cpu, bus| {
+            cpu.fetch_operand(bus, 0);
             let carry = cpu.flags.contains(Flags::CY) as u8;
             cpu.update_flags_add(cpu.gpr[Register::A], cpu.wz[0], true);
             cpu.gpr[Register::A] = cpu.gpr[Register::A]
@@ -496,9 +531,9 @@ impl<T: BusHandler> Cpu<T> {
 
     pub(crate) fn sub_m(&mut self) {
         // M2: Load value from memory
-        self.pipeline.push_back(|cpu| {
+        self.pipeline.push_back(|cpu, bus| {
             let addr = cpu.get_reg_pair(Register::H, Register::L);
-            let val = cpu.bus.mem_read(addr);
+            let val = bus.mem_read(addr);
             cpu.update_flags_sub(cpu.gpr[Register::A], val, false);
             cpu.gpr[Register::A] = cpu.gpr[Register::A].wrapping_sub(val);
         });
@@ -506,8 +541,8 @@ impl<T: BusHandler> Cpu<T> {
 
     pub(crate) fn sui(&mut self) {
         // M2: Fetch immediate value
-        self.pipeline.push_back(|cpu| {
-            cpu.fetch_operand(0);
+        self.pipeline.push_back(|cpu, bus| {
+            cpu.fetch_operand(bus, 0);
             cpu.update_flags_sub(cpu.gpr[Register::A], cpu.wz[0], false);
             cpu.gpr[Register::A] = cpu.gpr[Register::A].wrapping_sub(cpu.wz[0]);
         });
@@ -523,9 +558,9 @@ impl<T: BusHandler> Cpu<T> {
 
     pub(crate) fn sbb_m(&mut self) {
         // M2: Load value from memory
-        self.pipeline.push_back(|cpu| {
+        self.pipeline.push_back(|cpu, bus| {
             let addr = cpu.get_reg_pair(Register::H, Register::L);
-            let val = cpu.bus.mem_read(addr);
+            let val = bus.mem_read(addr);
             let carry = cpu.flags.contains(Flags::CY) as u8;
 
             cpu.update_flags_sub(cpu.gpr[Register::A], val, true);
@@ -535,8 +570,8 @@ impl<T: BusHandler> Cpu<T> {
 
     pub(crate) fn sbi(&mut self) {
         // M2: Fetch immediate value
-        self.pipeline.push_back(|cpu| {
-            cpu.fetch_operand(0);
+        self.pipeline.push_back(|cpu, bus| {
+            cpu.fetch_operand(bus, 0);
             let carry = cpu.flags.contains(Flags::CY) as u8;
             cpu.update_flags_sub(cpu.gpr[Register::A], cpu.wz[0], true);
             cpu.gpr[Register::A] = cpu.gpr[Register::A]
@@ -552,17 +587,17 @@ impl<T: BusHandler> Cpu<T> {
 
     pub(crate) fn inr_m(&mut self) {
         // M2: Load value from memory
-        self.pipeline.push_back(|cpu| {
+        self.pipeline.push_back(|cpu, bus| {
             let addr = cpu.get_reg_pair(Register::H, Register::L);
-            let val = cpu.bus.mem_read(addr);
+            let val = bus.mem_read(addr);
             cpu.update_flags_inc(val);
             cpu.wz[0] = val.wrapping_add(1);
         });
 
         // M3: Write value back to memory
-        self.pipeline.push_back(|cpu| {
+        self.pipeline.push_back(|cpu, bus| {
             let addr = cpu.get_reg_pair(Register::H, Register::L);
-            cpu.bus.mem_write(addr, cpu.wz[0]);
+            bus.mem_write(addr, cpu.wz[0]);
         });
     }
 
@@ -573,17 +608,17 @@ impl<T: BusHandler> Cpu<T> {
 
     pub(crate) fn dcr_m(&mut self) {
         // M2: Load value from memory
-        self.pipeline.push_back(|cpu| {
+        self.pipeline.push_back(|cpu, bus| {
             let addr = cpu.get_reg_pair(Register::H, Register::L);
-            let val = cpu.bus.mem_read(addr);
+            let val = bus.mem_read(addr);
             cpu.update_flags_dec(val);
             cpu.wz[0] = val.wrapping_sub(1);
         });
 
         // M3: Write value back to memory
-        self.pipeline.push_back(|cpu| {
+        self.pipeline.push_back(|cpu, bus| {
             let addr = cpu.get_reg_pair(Register::H, Register::L);
-            cpu.bus.mem_write(addr, cpu.wz[0]);
+            bus.mem_write(addr, cpu.wz[0]);
         });
     }
 
@@ -608,40 +643,40 @@ impl<T: BusHandler> Cpu<T> {
     pub(crate) fn dad_b(&mut self) {
         // M2: Add low byte
         self.pipeline
-            .push_back(|cpu| cpu.dad_r_m2(Register::B, Register::C));
+            .push_back(|cpu, _| cpu.dad_r_m2(Register::B, Register::C));
 
         // M3: Add high byte (see dad_r_m2 comment)
-        self.pipeline.push_back(|_| {});
+        self.pipeline.push_back(|_, _| {});
     }
 
     pub(crate) fn dad_d(&mut self) {
         // M2: Add low byte
         self.pipeline
-            .push_back(|cpu| cpu.dad_r_m2(Register::D, Register::E));
+            .push_back(|cpu, _| cpu.dad_r_m2(Register::D, Register::E));
 
         // M3: Add high byte (see dad_r_m2 comment)
-        self.pipeline.push_back(|_| {});
+        self.pipeline.push_back(|_, _| {});
     }
 
     pub(crate) fn dad_h(&mut self) {
         // M2: Add low byte
         self.pipeline
-            .push_back(|cpu| cpu.dad_r_m2(Register::H, Register::L));
+            .push_back(|cpu, _| cpu.dad_r_m2(Register::H, Register::L));
 
         // M3: Add high byte (see dad_r_m2 comment)
-        self.pipeline.push_back(|_| {});
+        self.pipeline.push_back(|_, _| {});
     }
 
     pub(crate) fn dad_sp(&mut self) {
         // M2: Load value from memory
-        self.pipeline.push_back(|cpu| {
+        self.pipeline.push_back(|cpu, _| {
             let pair1 = cpu.get_reg_pair(Register::H, Register::L) as u32;
             let res = pair1 + cpu.sp as u32;
             cpu.flags.set(Flags::CY, res > 0xFFFF);
             cpu.set_reg_pair(Register::H, Register::L, res as u16);
         });
 
-        self.pipeline.push_back(|_| {});
+        self.pipeline.push_back(|_, _| {});
     }
 
     pub(crate) fn daa(&mut self) {
@@ -674,9 +709,9 @@ impl<T: BusHandler> Cpu<T> {
 
     pub(crate) fn ana_m(&mut self) {
         // M2: Load value from memory
-        self.pipeline.push_back(|cpu| {
+        self.pipeline.push_back(|cpu, bus| {
             let addr = cpu.get_reg_pair(Register::H, Register::L);
-            let val = cpu.bus.mem_read(addr);
+            let val = bus.mem_read(addr);
             cpu.update_flags_and(cpu.gpr[Register::A], val);
             cpu.gpr[Register::A] &= val;
         });
@@ -684,8 +719,8 @@ impl<T: BusHandler> Cpu<T> {
 
     pub(crate) fn ani(&mut self) {
         // M2: Fetch immediate value
-        self.pipeline.push_back(|cpu| {
-            cpu.fetch_operand(0);
+        self.pipeline.push_back(|cpu, bus| {
+            cpu.fetch_operand(bus, 0);
             cpu.update_flags_and(cpu.gpr[Register::A], cpu.wz[0]);
             cpu.gpr[Register::A] &= cpu.wz[0];
         });
@@ -699,9 +734,9 @@ impl<T: BusHandler> Cpu<T> {
 
     pub(crate) fn xra_m(&mut self) {
         // M2: Load value from memory
-        self.pipeline.push_back(|cpu| {
+        self.pipeline.push_back(|cpu, bus| {
             let addr = cpu.get_reg_pair(Register::H, Register::L);
-            let val = cpu.bus.mem_read(addr);
+            let val = bus.mem_read(addr);
             let res = cpu.gpr[Register::A] ^ val;
             cpu.update_flags_or(res);
             cpu.gpr[Register::A] = res;
@@ -710,8 +745,8 @@ impl<T: BusHandler> Cpu<T> {
 
     pub(crate) fn xri(&mut self) {
         // M2: Fetch immediate value
-        self.pipeline.push_back(|cpu| {
-            cpu.fetch_operand(0);
+        self.pipeline.push_back(|cpu, bus| {
+            cpu.fetch_operand(bus, 0);
             let res = cpu.gpr[Register::A] ^ cpu.wz[0];
             cpu.update_flags_or(res);
             cpu.gpr[Register::A] = res;
@@ -726,9 +761,9 @@ impl<T: BusHandler> Cpu<T> {
 
     pub(crate) fn ora_m(&mut self) {
         // M2: Fetch immediate value
-        self.pipeline.push_back(|cpu| {
+        self.pipeline.push_back(|cpu, bus| {
             let addr = cpu.get_reg_pair(Register::H, Register::L);
-            let val = cpu.bus.mem_read(addr);
+            let val = bus.mem_read(addr);
             let res = cpu.gpr[Register::A] | val;
             cpu.update_flags_or(res);
             cpu.gpr[Register::A] = res;
@@ -737,8 +772,8 @@ impl<T: BusHandler> Cpu<T> {
 
     pub(crate) fn ori(&mut self) {
         // M2: Fetch immediate value
-        self.pipeline.push_back(|cpu| {
-            cpu.fetch_operand(0);
+        self.pipeline.push_back(|cpu, bus| {
+            cpu.fetch_operand(bus, 0);
             let res = cpu.gpr[Register::A] | cpu.wz[0];
             cpu.update_flags_or(res);
             cpu.gpr[Register::A] = res;
@@ -751,17 +786,17 @@ impl<T: BusHandler> Cpu<T> {
 
     pub(crate) fn cmp_m(&mut self) {
         // M2: Load value from memory
-        self.pipeline.push_back(|cpu| {
+        self.pipeline.push_back(|cpu, bus| {
             let addr = cpu.get_reg_pair(Register::H, Register::L);
-            let val = cpu.bus.mem_read(addr);
+            let val = bus.mem_read(addr);
             cpu.update_flags_cmp(cpu.gpr[Register::A], val);
         });
     }
 
     pub(crate) fn cpi(&mut self) {
         // M2: Fetch immediate value
-        self.pipeline.push_back(|cpu| {
-            cpu.fetch_operand(0);
+        self.pipeline.push_back(|cpu, bus| {
+            cpu.fetch_operand(bus, 0);
             cpu.update_flags_cmp(cpu.gpr[Register::A], cpu.wz[0]);
         });
     }
@@ -832,11 +867,12 @@ impl<T: BusHandler> Cpu<T> {
 
     pub(crate) fn jmp(&mut self) {
         // M2: Fetch low byte of target addr
-        self.pipeline.push_back(|cpu| cpu.fetch_operand(0));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.fetch_operand(bus, 0));
 
         // M3: Fetch high byte of target addr then jump
-        self.pipeline.push_back(|cpu| {
-            cpu.fetch_operand(1);
+        self.pipeline.push_back(|cpu, bus| {
+            cpu.fetch_operand(bus, 1);
             let addr = u16::from_le_bytes(cpu.wz);
             cpu.pc = addr;
         });
@@ -845,105 +881,125 @@ impl<T: BusHandler> Cpu<T> {
     pub(crate) fn jnz(&mut self) {
         // M2: Fetch low byte of target addr, evaluate Z flag clear
         // M3 (non-8080 only): Fetch high byte of target addr only if branch taken
-        self.pipeline.push_back(|cpu| cpu.jcc_m2(Flags::Z, false));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.jcc_m2(bus, Flags::Z, false));
 
         // M3 (8080 only): Fetch high byte of target addr regardless if branch taken
         #[cfg(feature = "i8080")]
-        self.pipeline.push_back(|cpu| cpu.jcc_m3(Flags::Z, false));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.jcc_m3(bus, Flags::Z, false));
     }
 
     pub(crate) fn jz(&mut self) {
         // M2: Fetch low byte of target addr, evaluate Z flag set
         // M3 (non-8080 only): Fetch high byte of target addr only if branch taken
-        self.pipeline.push_back(|cpu| cpu.jcc_m2(Flags::Z, true));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.jcc_m2(bus, Flags::Z, true));
 
         // M3 (8080 only): Fetch high byte of target addr regardless if branch taken
         #[cfg(feature = "i8080")]
-        self.pipeline.push_back(|cpu| cpu.jcc_m3(Flags::Z, true));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.jcc_m3(bus, Flags::Z, true));
     }
 
     pub(crate) fn jnc(&mut self) {
         // M2: Fetch low byte of target addr, evaluate CY flag clear
         // M3 (non-8080 only): Fetch high byte of target addr only if branch taken
-        self.pipeline.push_back(|cpu| cpu.jcc_m2(Flags::CY, false));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.jcc_m2(bus, Flags::CY, false));
 
         // M3 (8080 only): Fetch high byte of target addr regardless if branch taken
         #[cfg(feature = "i8080")]
-        self.pipeline.push_back(|cpu| cpu.jcc_m3(Flags::CY, false));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.jcc_m3(bus, Flags::CY, false));
     }
 
     pub(crate) fn jc(&mut self) {
         // M2: Fetch low byte of target addr, evaluate CY flag set
         // M3 (non-8080 only): Fetch high byte of target addr only if branch taken
-        self.pipeline.push_back(|cpu| cpu.jcc_m2(Flags::CY, true));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.jcc_m2(bus, Flags::CY, true));
 
         // M3 (8080 only): Fetch high byte of target addr regardless if branch taken
         #[cfg(feature = "i8080")]
-        self.pipeline.push_back(|cpu| cpu.jcc_m3(Flags::CY, true));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.jcc_m3(bus, Flags::CY, true));
     }
 
     pub(crate) fn jpo(&mut self) {
         // M2: Fetch low byte of target addr, evaluate P flag clear
         // M3 (non-8080 only): Fetch high byte of target addr only if branch taken
-        self.pipeline.push_back(|cpu| cpu.jcc_m2(Flags::P, false));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.jcc_m2(bus, Flags::P, false));
 
         // M3 (8080 only): Fetch high byte of target addr regardless if branch taken
         #[cfg(feature = "i8080")]
-        self.pipeline.push_back(|cpu| cpu.jcc_m3(Flags::P, false));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.jcc_m3(bus, Flags::P, false));
     }
 
     pub(crate) fn jpe(&mut self) {
         // M2: Fetch low byte of target addr, evaluate P flag set
         // M3 (non-8080 only): Fetch high byte of target addr only if branch taken
-        self.pipeline.push_back(|cpu| cpu.jcc_m2(Flags::P, true));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.jcc_m2(bus, Flags::P, true));
 
         // M3 (8080 only): Fetch high byte of target addr regardless if branch taken
         #[cfg(feature = "i8080")]
-        self.pipeline.push_back(|cpu| cpu.jcc_m3(Flags::P, true));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.jcc_m3(bus, Flags::P, true));
     }
 
     pub(crate) fn jp(&mut self) {
         // M2: Fetch low byte of target addr, evaluate S flag clear
         // M3 (non-8080 only): Fetch high byte of target addr only if branch taken
-        self.pipeline.push_back(|cpu| cpu.jcc_m2(Flags::S, false));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.jcc_m2(bus, Flags::S, false));
 
         // M3 (8080 only): Fetch high byte of target addr regardless if branch taken
         #[cfg(feature = "i8080")]
-        self.pipeline.push_back(|cpu| cpu.jcc_m3(Flags::S, false));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.jcc_m3(bus, Flags::S, false));
     }
 
     pub(crate) fn jm(&mut self) {
         // M2: Fetch low byte of target addr, evaluate S flag set
         // M3 (non-8080 only): Fetch high byte of target addr only if branch taken
-        self.pipeline.push_back(|cpu| cpu.jcc_m2(Flags::S, true));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.jcc_m2(bus, Flags::S, true));
 
         // M3 (8080 only): Fetch high byte of target addr regardless if branch taken
         #[cfg(feature = "i8080")]
-        self.pipeline.push_back(|cpu| cpu.jcc_m3(Flags::S, true));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.jcc_m3(bus, Flags::S, true));
     }
 
     pub(crate) fn call(&mut self) {
         // M2: Fetch low byte of target addr
-        self.pipeline.push_back(|cpu| cpu.fetch_operand(0));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.fetch_operand(bus, 0));
 
         // M3: Fetch high byte of target addr
-        self.pipeline.push_back(|cpu| cpu.fetch_operand(1));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.fetch_operand(bus, 1));
 
         // M4: Push high byte of return addr
-        self.pipeline.push_back(|cpu| cpu.call_m4());
+        self.pipeline.push_back(|cpu, bus| cpu.call_m4(bus));
 
         // M5: Push low byte of return addr, then jump
-        self.pipeline.push_back(|cpu| cpu.call_m5());
+        self.pipeline.push_back(|cpu, bus| cpu.call_m5(bus));
     }
 
     pub(crate) fn cnz(&mut self) {
         // M2: Fetch low byte of target addr
         // M3: (non-8080 only): Fetch high byte of target addr if branch taken
-        self.pipeline.push_back(|cpu| cpu.ccc_m2(Flags::Z, false));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.ccc_m2(bus, Flags::Z, false));
 
         // M3 (8080 only): Fetch high byte of target addr regardless if branch taken
         #[cfg(feature = "i8080")]
-        self.pipeline.push_back(|cpu| cpu.ccc_m3(Flags::Z, false));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.ccc_m3(bus, Flags::Z, false));
 
         // Queued in the above calls only if branch taken:
         // M4: Push high byte of return addr
@@ -953,11 +1009,13 @@ impl<T: BusHandler> Cpu<T> {
     pub(crate) fn cz(&mut self) {
         // M2: Fetch low byte of target addr
         // M3: (non-8080 only): Fetch high byte of target addr if branch taken
-        self.pipeline.push_back(|cpu| cpu.ccc_m2(Flags::Z, true));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.ccc_m2(bus, Flags::Z, true));
 
         // M3 (8080 only): Fetch high byte of target addr regardless if branch taken
         #[cfg(feature = "i8080")]
-        self.pipeline.push_back(|cpu| cpu.ccc_m3(Flags::Z, true));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.ccc_m3(bus, Flags::Z, true));
 
         // Queued in the above calls only if branch taken:
         // M4: Push high byte of return addr
@@ -967,11 +1025,13 @@ impl<T: BusHandler> Cpu<T> {
     pub(crate) fn cnc(&mut self) {
         // M2: Fetch low byte of target addr
         // M3: (non-8080 only): Fetch high byte of target addr if branch taken
-        self.pipeline.push_back(|cpu| cpu.ccc_m2(Flags::CY, false));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.ccc_m2(bus, Flags::CY, false));
 
         // M3 (8080 only): Fetch high byte of target addr regardless if branch taken
         #[cfg(feature = "i8080")]
-        self.pipeline.push_back(|cpu| cpu.ccc_m3(Flags::CY, false));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.ccc_m3(bus, Flags::CY, false));
 
         // Queued in the above calls only if branch taken:
         // M4: Push high byte of return addr
@@ -981,11 +1041,13 @@ impl<T: BusHandler> Cpu<T> {
     pub(crate) fn cc(&mut self) {
         // M2: Fetch low byte of target addr
         // M3: (non-8080 only): Fetch high byte of target addr if branch taken
-        self.pipeline.push_back(|cpu| cpu.ccc_m2(Flags::CY, true));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.ccc_m2(bus, Flags::CY, true));
 
         // M3 (8080 only): Fetch high byte of target addr regardless if branch taken
         #[cfg(feature = "i8080")]
-        self.pipeline.push_back(|cpu| cpu.ccc_m3(Flags::CY, true));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.ccc_m3(bus, Flags::CY, true));
 
         // Queued in the above calls only if branch taken:
         // M4: Push high byte of return addr
@@ -995,11 +1057,13 @@ impl<T: BusHandler> Cpu<T> {
     pub(crate) fn cpo(&mut self) {
         // M2: Fetch low byte of target addr
         // M3: (non-8080 only): Fetch high byte of target addr if branch taken
-        self.pipeline.push_back(|cpu| cpu.ccc_m2(Flags::P, false));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.ccc_m2(bus, Flags::P, false));
 
         // M3 (8080 only): Fetch high byte of target addr regardless if branch taken
         #[cfg(feature = "i8080")]
-        self.pipeline.push_back(|cpu| cpu.ccc_m3(Flags::P, false));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.ccc_m3(bus, Flags::P, false));
 
         // Queued in the above calls only if branch taken:
         // M4: Push high byte of return addr
@@ -1009,11 +1073,13 @@ impl<T: BusHandler> Cpu<T> {
     pub(crate) fn cpe(&mut self) {
         // M2: Fetch low byte of target addr
         // M3: (non-8080 only): Fetch high byte of target addr if branch taken
-        self.pipeline.push_back(|cpu| cpu.ccc_m2(Flags::P, true));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.ccc_m2(bus, Flags::P, true));
 
         // M3 (8080 only): Fetch high byte of target addr regardless if branch taken
         #[cfg(feature = "i8080")]
-        self.pipeline.push_back(|cpu| cpu.ccc_m3(Flags::P, true));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.ccc_m3(bus, Flags::P, true));
 
         // Queued in the above calls only if branch taken:
         // M4: Push high byte of return addr
@@ -1023,11 +1089,13 @@ impl<T: BusHandler> Cpu<T> {
     pub(crate) fn cp(&mut self) {
         // M2: Fetch low byte of target addr
         // M3: (non-8080 only): Fetch high byte of target addr if branch taken
-        self.pipeline.push_back(|cpu| cpu.ccc_m2(Flags::S, false));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.ccc_m2(bus, Flags::S, false));
 
         // M3 (8080 only): Fetch high byte of target addr regardless if branch taken
         #[cfg(feature = "i8080")]
-        self.pipeline.push_back(|cpu| cpu.ccc_m3(Flags::S, false));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.ccc_m3(bus, Flags::S, false));
 
         // Queued in the above calls only if branch taken:
         // M4: Push high byte of return addr
@@ -1037,11 +1105,13 @@ impl<T: BusHandler> Cpu<T> {
     pub(crate) fn cm(&mut self) {
         // M2: Fetch low byte of target addr
         // M3: (non-8080 only): Fetch high byte of target addr if branch taken
-        self.pipeline.push_back(|cpu| cpu.ccc_m2(Flags::S, true));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.ccc_m2(bus, Flags::S, true));
 
         // M3 (8080 only): Fetch high byte of target addr regardless if branch taken
         #[cfg(feature = "i8080")]
-        self.pipeline.push_back(|cpu| cpu.ccc_m3(Flags::S, true));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.ccc_m3(bus, Flags::S, true));
 
         // Queued in the above calls only if branch taken:
         // M4: Push high byte of return addr
@@ -1050,154 +1120,154 @@ impl<T: BusHandler> Cpu<T> {
 
     pub(crate) fn ret(&mut self) {
         // M2: Pop low byte of return address from stack
-        self.pipeline.push_back(|cpu| cpu.ret_m2());
+        self.pipeline.push_back(|cpu, bus| cpu.ret_m2(bus));
 
         // M3: Pop high byte of return address from stack, then jump
-        self.pipeline.push_back(|cpu| cpu.ret_m3());
+        self.pipeline.push_back(|cpu, bus| cpu.ret_m3(bus));
     }
 
     pub(crate) fn rnz(&mut self) {
         if !self.flags.contains(Flags::Z) {
             // M2: Pop low byte of return address from stack
-            self.pipeline.push_back(|cpu| cpu.ret_m2());
+            self.pipeline.push_back(|cpu, bus| cpu.ret_m2(bus));
 
             // M3: Pop high byte of return address from stack, then jump
-            self.pipeline.push_back(|cpu| cpu.ret_m3());
+            self.pipeline.push_back(|cpu, bus| cpu.ret_m3(bus));
         }
     }
 
     pub(crate) fn rz(&mut self) {
         if self.flags.contains(Flags::Z) {
             // M2: Pop low byte of return address from stack
-            self.pipeline.push_back(|cpu| cpu.ret_m2());
+            self.pipeline.push_back(|cpu, bus| cpu.ret_m2(bus));
 
             // M3: Pop high byte of return address from stack, then jump
-            self.pipeline.push_back(|cpu| cpu.ret_m3());
+            self.pipeline.push_back(|cpu, bus| cpu.ret_m3(bus));
         }
     }
 
     pub(crate) fn rnc(&mut self) {
         if !self.flags.contains(Flags::CY) {
             // M2: Pop low byte of return address from stack
-            self.pipeline.push_back(|cpu| cpu.ret_m2());
+            self.pipeline.push_back(|cpu, bus| cpu.ret_m2(bus));
 
             // M3: Pop high byte of return address from stack, then jump
-            self.pipeline.push_back(|cpu| cpu.ret_m3());
+            self.pipeline.push_back(|cpu, bus| cpu.ret_m3(bus));
         }
     }
 
     pub(crate) fn rc(&mut self) {
         if self.flags.contains(Flags::CY) {
             // M2: Pop low byte of return address from stack
-            self.pipeline.push_back(|cpu| cpu.ret_m2());
+            self.pipeline.push_back(|cpu, bus| cpu.ret_m2(bus));
 
             // M3: Pop high byte of return address from stack, then jump
-            self.pipeline.push_back(|cpu| cpu.ret_m3());
+            self.pipeline.push_back(|cpu, bus| cpu.ret_m3(bus));
         }
     }
 
     pub(crate) fn rpo(&mut self) {
         if !self.flags.contains(Flags::P) {
             // M2: Pop low byte of return address from stack
-            self.pipeline.push_back(|cpu| cpu.ret_m2());
+            self.pipeline.push_back(|cpu, bus| cpu.ret_m2(bus));
 
             // M3: Pop high byte of return address from stack, then jump
-            self.pipeline.push_back(|cpu| cpu.ret_m3());
+            self.pipeline.push_back(|cpu, bus| cpu.ret_m3(bus));
         }
     }
 
     pub(crate) fn rpe(&mut self) {
         if self.flags.contains(Flags::P) {
             // M2: Pop low byte of return address from stack
-            self.pipeline.push_back(|cpu| cpu.ret_m2());
+            self.pipeline.push_back(|cpu, bus| cpu.ret_m2(bus));
 
             // M3: Pop high byte of return address from stack, then jump
-            self.pipeline.push_back(|cpu| cpu.ret_m3());
+            self.pipeline.push_back(|cpu, bus| cpu.ret_m3(bus));
         }
     }
 
     pub(crate) fn rp(&mut self) {
         if !self.flags.contains(Flags::S) {
             // M2: Pop low byte of return address from stack
-            self.pipeline.push_back(|cpu| cpu.ret_m2());
+            self.pipeline.push_back(|cpu, bus| cpu.ret_m2(bus));
 
             // M3: Pop high byte of return address from stack, then jump
-            self.pipeline.push_back(|cpu| cpu.ret_m3());
+            self.pipeline.push_back(|cpu, bus| cpu.ret_m3(bus));
         }
     }
 
     pub(crate) fn rm(&mut self) {
         if self.flags.contains(Flags::S) {
             // M2: Pop low byte of return address from stack
-            self.pipeline.push_back(|cpu| cpu.ret_m2());
+            self.pipeline.push_back(|cpu, bus| cpu.ret_m2(bus));
 
             // M3: Pop high byte of return address from stack, then jump
-            self.pipeline.push_back(|cpu| cpu.ret_m3());
+            self.pipeline.push_back(|cpu, bus| cpu.ret_m3(bus));
         }
     }
 
     pub(crate) fn rst_0(&mut self) {
         // M2: Push high byte of return address to stack
-        self.pipeline.push_back(|cpu| cpu.rst_n_m2());
+        self.pipeline.push_back(|cpu, bus| cpu.rst_n_m2(bus));
 
         // M3: Push low byte of return address to stack, then jump
-        self.pipeline.push_back(|cpu| cpu.rst_n_m3(0));
+        self.pipeline.push_back(|cpu, bus| cpu.rst_n_m3(bus, 0));
     }
 
     pub(crate) fn rst_1(&mut self) {
         // M2: Push high byte of return address to stack
-        self.pipeline.push_back(|cpu| cpu.rst_n_m2());
+        self.pipeline.push_back(|cpu, bus| cpu.rst_n_m2(bus));
 
         // M3: Push low byte of return address to stack, then jump
-        self.pipeline.push_back(|cpu| cpu.rst_n_m3(1));
+        self.pipeline.push_back(|cpu, bus| cpu.rst_n_m3(bus, 1));
     }
 
     pub(crate) fn rst_2(&mut self) {
         // M2: Push high byte of return address to stack
-        self.pipeline.push_back(|cpu| cpu.rst_n_m2());
+        self.pipeline.push_back(|cpu, bus| cpu.rst_n_m2(bus));
 
         // M3: Push low byte of return address to stack, then jump
-        self.pipeline.push_back(|cpu| cpu.rst_n_m3(2));
+        self.pipeline.push_back(|cpu, bus| cpu.rst_n_m3(bus, 2));
     }
 
     pub(crate) fn rst_3(&mut self) {
         // M2: Push high byte of return address to stack
-        self.pipeline.push_back(|cpu| cpu.rst_n_m2());
+        self.pipeline.push_back(|cpu, bus| cpu.rst_n_m2(bus));
 
         // M3: Push low byte of return address to stack, then jump
-        self.pipeline.push_back(|cpu| cpu.rst_n_m3(3));
+        self.pipeline.push_back(|cpu, bus| cpu.rst_n_m3(bus, 3));
     }
 
     pub(crate) fn rst_4(&mut self) {
         // M2: Push high byte of return address to stack
-        self.pipeline.push_back(|cpu| cpu.rst_n_m2());
+        self.pipeline.push_back(|cpu, bus| cpu.rst_n_m2(bus));
 
         // M3: Push low byte of return address to stack, then jump
-        self.pipeline.push_back(|cpu| cpu.rst_n_m3(4));
+        self.pipeline.push_back(|cpu, bus| cpu.rst_n_m3(bus, 4));
     }
 
     pub(crate) fn rst_5(&mut self) {
         // M2: Push high byte of return address to stack
-        self.pipeline.push_back(|cpu| cpu.rst_n_m2());
+        self.pipeline.push_back(|cpu, bus| cpu.rst_n_m2(bus));
 
         // M3: Push low byte of return address to stack, then jump
-        self.pipeline.push_back(|cpu| cpu.rst_n_m3(5));
+        self.pipeline.push_back(|cpu, bus| cpu.rst_n_m3(bus, 5));
     }
 
     pub(crate) fn rst_6(&mut self) {
         // M2: Push high byte of return address to stack
-        self.pipeline.push_back(|cpu| cpu.rst_n_m2());
+        self.pipeline.push_back(|cpu, bus| cpu.rst_n_m2(bus));
 
         // M3: Push low byte of return address to stack, then jump
-        self.pipeline.push_back(|cpu| cpu.rst_n_m3(6));
+        self.pipeline.push_back(|cpu, bus| cpu.rst_n_m3(bus, 6));
     }
 
     pub(crate) fn rst_7(&mut self) {
         // M2: Push high byte of return address to stack
-        self.pipeline.push_back(|cpu| cpu.rst_n_m2());
+        self.pipeline.push_back(|cpu, bus| cpu.rst_n_m2(bus));
 
         // M3: Push low byte of return address to stack, then jump
-        self.pipeline.push_back(|cpu| cpu.rst_n_m3(7));
+        self.pipeline.push_back(|cpu, bus| cpu.rst_n_m3(bus, 7));
     }
 
     pub(crate) fn pchl(&mut self) {
@@ -1207,68 +1277,81 @@ impl<T: BusHandler> Cpu<T> {
 
     pub(crate) fn push_b(&mut self) {
         // M2: Push high byte of register pair to stack
-        self.pipeline.push_back(|cpu| cpu.push_r(Register::B));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.push_r(bus, Register::B));
 
         // M3: Push low byte of register pair to stack
-        self.pipeline.push_back(|cpu| cpu.push_r(Register::C));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.push_r(bus, Register::C));
     }
 
     pub(crate) fn push_d(&mut self) {
         // M2: Push high byte of register pair to stack
-        self.pipeline.push_back(|cpu| cpu.push_r(Register::D));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.push_r(bus, Register::D));
 
         // M3: Push low byte of register pair to stack
-        self.pipeline.push_back(|cpu| cpu.push_r(Register::E));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.push_r(bus, Register::E));
     }
 
     pub(crate) fn push_h(&mut self) {
         // M2: Push high byte of register pair to stack
-        self.pipeline.push_back(|cpu| cpu.push_r(Register::H));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.push_r(bus, Register::H));
 
         // M3: Push low byte of register pair to stack
-        self.pipeline.push_back(|cpu| cpu.push_r(Register::L));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.push_r(bus, Register::L));
     }
 
     pub(crate) fn push_psw(&mut self) {
         // M2: Push accumulator to stack
-        self.pipeline.push_back(|cpu| cpu.push_r(Register::A));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.push_r(bus, Register::A));
 
         // M3: Push status flags (formatted as 8 bits) to stack
-        self.pipeline.push_back(|cpu| {
+        self.pipeline.push_back(|cpu, bus| {
             let psw = cpu.flags_to_u8();
             cpu.sp = cpu.sp.wrapping_sub(1);
-            cpu.bus.mem_write(cpu.sp, psw);
+            bus.mem_write(cpu.sp, psw);
         });
     }
 
     pub(crate) fn pop_b(&mut self) {
         // M2: Pop stack into low byte of register pair
-        self.pipeline.push_back(|cpu| cpu.pop_r(Register::C));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.pop_r(bus, Register::C));
 
         // M3: Pop stack into high byte of register pair
-        self.pipeline.push_back(|cpu| cpu.pop_r(Register::B));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.pop_r(bus, Register::B));
     }
 
     pub(crate) fn pop_d(&mut self) {
         // M2: Pop stack into low byte of register pair
-        self.pipeline.push_back(|cpu| cpu.pop_r(Register::E));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.pop_r(bus, Register::E));
 
         // M3: Pop stack into high byte of register pair
-        self.pipeline.push_back(|cpu| cpu.pop_r(Register::D));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.pop_r(bus, Register::D));
     }
 
     pub(crate) fn pop_h(&mut self) {
         // M2: Pop stack into low byte of register pair
-        self.pipeline.push_back(|cpu| cpu.pop_r(Register::L));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.pop_r(bus, Register::L));
 
         // M3: Pop stack into high byte of register pair
-        self.pipeline.push_back(|cpu| cpu.pop_r(Register::H));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.pop_r(bus, Register::H));
     }
 
     pub(crate) fn pop_psw(&mut self) {
         // M2: Pop stack into status flags
-        self.pipeline.push_back(|cpu| {
-            let psw = cpu.bus.mem_read(cpu.sp);
+        self.pipeline.push_back(|cpu, bus| {
+            let psw = bus.mem_read(cpu.sp);
             cpu.sp = cpu.sp.wrapping_add(1);
             cpu.flags.set(Flags::CY, (psw & 1) != 0);
             cpu.flags.set(Flags::P, (psw & (1 << 2)) != 0);
@@ -1278,29 +1361,29 @@ impl<T: BusHandler> Cpu<T> {
         });
 
         // M3: Pop stack into accumulator
-        self.pipeline.push_back(|cpu| cpu.pop_r(Register::A));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.pop_r(bus, Register::A));
     }
 
     pub(crate) fn xthl(&mut self) {
         // M2: Read stack into wz (for L)
-        self.pipeline.push_back(|cpu| {
-            cpu.wz[0] = cpu.bus.mem_read(cpu.sp);
+        self.pipeline.push_back(|cpu, bus| {
+            cpu.wz[0] = bus.mem_read(cpu.sp);
         });
 
         // M3: Read stack + 1 into wz (for H)
-        self.pipeline.push_back(|cpu| {
-            cpu.wz[1] = cpu.bus.mem_read(cpu.sp.wrapping_add(1));
+        self.pipeline.push_back(|cpu, bus| {
+            cpu.wz[1] = bus.mem_read(cpu.sp.wrapping_add(1));
         });
 
         // M4: Replace stack with L
-        self.pipeline.push_back(|cpu| {
-            cpu.bus.mem_write(cpu.sp, cpu.gpr[Register::L]);
+        self.pipeline.push_back(|cpu, bus| {
+            bus.mem_write(cpu.sp, cpu.gpr[Register::L]);
         });
 
         // M5: Replace stack + 1 with H, set HL pair
-        self.pipeline.push_back(|cpu| {
-            cpu.bus
-                .mem_write(cpu.sp.wrapping_add(1), cpu.gpr[Register::H]);
+        self.pipeline.push_back(|cpu, bus| {
+            bus.mem_write(cpu.sp.wrapping_add(1), cpu.gpr[Register::H]);
             let val = u16::from_le_bytes(cpu.wz);
             cpu.set_reg_pair(Register::H, Register::L, val);
         });
@@ -1312,21 +1395,23 @@ impl<T: BusHandler> Cpu<T> {
 
     pub(crate) fn inp(&mut self) {
         // M2: Fetch immediate port number
-        self.pipeline.push_back(|cpu| cpu.fetch_operand(0));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.fetch_operand(bus, 0));
 
         // M3: Read from port
-        self.pipeline.push_back(|cpu| {
-            cpu.gpr[Register::A] = cpu.bus.port_read(cpu.wz[0]);
+        self.pipeline.push_back(|cpu, bus| {
+            cpu.gpr[Register::A] = bus.port_read(cpu.wz[0]);
         });
     }
 
     pub(crate) fn outp(&mut self) {
         // M2: Fetch immediate port number
-        self.pipeline.push_back(|cpu| cpu.fetch_operand(0));
+        self.pipeline
+            .push_back(|cpu, bus| cpu.fetch_operand(bus, 0));
 
         // M3: Write to port
-        self.pipeline.push_back(|cpu| {
-            cpu.bus.port_write(cpu.wz[0], cpu.gpr[Register::A]);
+        self.pipeline.push_back(|cpu, bus| {
+            bus.port_write(cpu.wz[0], cpu.gpr[Register::A]);
         });
     }
 

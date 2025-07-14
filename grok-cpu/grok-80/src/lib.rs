@@ -2,11 +2,12 @@ mod flags;
 mod instructions;
 mod opcodes;
 
+use grok_bus::BusHandler;
 pub use opcodes::*;
 use std::collections::VecDeque;
 use std::ops::{Index, IndexMut};
 
-type MicroOp<T> = fn(&mut Cpu<T>);
+type MicroOp<T> = fn(&mut Cpu<T>, &mut T);
 type TCycles = u64;
 type MCycles = u64;
 
@@ -17,18 +18,6 @@ type MCycles = u64;
     feature = "sm83"
 )))]
 compile_error!("A CPU variant must be selected!");
-
-pub trait BusHandler {
-    fn mem_read(&mut self, addr: u16) -> u8;
-    fn mem_write(&mut self, addr: u16, val: u8);
-    fn port_read(&mut self, port: u8) -> u8;
-    fn port_write(&mut self, port: u8, val: u8);
-
-    // Peek memory without causing any side-effects that a read might have
-    fn mem_peek(&mut self, addr: u16) -> u8 {
-        self.mem_read(addr)
-    }
-}
 
 #[derive(Copy, Clone, Debug)]
 #[repr(usize)]
@@ -87,8 +76,6 @@ pub struct Cpu<T: BusHandler> {
     interrupt: Option<Opcode>,
     // Halt state
     halt: bool,
-    // A bus handler for reading/writing memory and ports
-    bus: T,
     // A "pipeline" of micro ops (each representing an M-cycle)
     pipeline: VecDeque<MicroOp<T>>,
     // Current opcode being executed
@@ -97,9 +84,15 @@ pub struct Cpu<T: BusHandler> {
     mcycle: usize,
 }
 
+impl<T: BusHandler> Default for Cpu<T> {
+    fn default() -> Self {
+        Cpu::new()
+    }
+}
+
 impl<T: BusHandler> Cpu<T> {
-    /// Creates a new CPU with bus
-    pub fn new(bus: T) -> Self {
+    /// Creates a new CPU
+    pub fn new() -> Self {
         Self {
             pc: 0x0000,
             sp: 0x0000,
@@ -109,7 +102,6 @@ impl<T: BusHandler> Cpu<T> {
             iff: IffState::Disabled,
             interrupt: None,
             halt: false,
-            bus,
             pipeline: VecDeque::new(),
             op_info: Opcode::UNDEF_1.info(),
             mcycle: 0,
@@ -117,15 +109,15 @@ impl<T: BusHandler> Cpu<T> {
     }
 
     /// Advances the CPU one M-cycle and returns the number of T-cycles taken
-    pub fn tick(&mut self) -> Option<TCycles> {
+    pub fn tick(&mut self, bus: &mut T) -> Option<TCycles> {
         // If the pipeline is not empty, then work our way through it.
         if let Some(micro_op) = self.pipeline.pop_front() {
-            micro_op(self);
+            micro_op(self, bus);
 
         // If the pipeline is empty, we know we've finished executing the previous instruction.
         // So fetch the next one.
         } else {
-            let opcode = self.fetch()?;
+            let opcode = self.fetch(bus)?;
 
             // Executing the instruction really means it pushes its micro ops to the pipeline.
             // Though instructions consisting of a single M-cycle will also just immediately execute here.
@@ -138,19 +130,19 @@ impl<T: BusHandler> Cpu<T> {
     }
 
     /// Advances the CPU one instruction and returns the number of M and T cycles taken
-    pub fn step(&mut self) -> Option<Cycles> {
+    pub fn step(&mut self, bus: &mut T) -> Option<Cycles> {
         // Should only be called on instruction boundaries
         assert!(self.pipeline.is_empty());
 
         // Fetch the next instruction
-        let opcode = self.fetch()?;
+        let opcode = self.fetch(bus)?;
 
         self.execute(opcode);
 
         // Execute every micro op in the pipeline tracking total number of M and T cycles
         let mut tcycles = 0;
         while let Some(micro_op) = self.pipeline.pop_front() {
-            micro_op(self);
+            micro_op(self, bus);
             tcycles += self.op_info.t_per_m[self.mcycle]?;
             self.mcycle += 1;
         }
@@ -174,17 +166,7 @@ impl<T: BusHandler> Cpu<T> {
         self.interrupt = Some(opcode);
     }
 
-    /// Returns a reference to the bus
-    pub fn bus(&self) -> &T {
-        &self.bus
-    }
-
-    /// Destroys the CPU and returns the bus
-    pub fn destroy(self) -> T {
-        self.bus
-    }
-
-    fn fetch(&mut self) -> Option<Opcode> {
+    fn fetch(&mut self, bus: &mut T) -> Option<Opcode> {
         // If interrupts are enabled and an interrupt is pending, handle it
         let opcode = if self.iff == IffState::Enabled
             && let Some(opcode) = self.interrupt
@@ -205,7 +187,7 @@ impl<T: BusHandler> Cpu<T> {
                 self.iff = IffState::Enabled;
             }
 
-            let opcode = Opcode::from(self.bus.mem_read(self.pc));
+            let opcode = Opcode::from(bus.mem_read(self.pc));
             self.pc = self.pc.wrapping_add(1);
             Some(opcode)
         };
@@ -545,23 +527,23 @@ impl IndexMut<Register> for [u8] {
     }
 }
 
-impl<T: BusHandler> grok_dbg::DebugHandler for Cpu<T> {
-    fn peek(&mut self, addr: usize) -> u8 {
-        self.bus.mem_peek(addr as u16)
+impl<T: BusHandler> grok_dbg::DebugHandler<T> for Cpu<T> {
+    fn peek(&mut self, bus: &mut T, addr: usize) -> u8 {
+        bus.mem_peek(addr as u16)
     }
 
-    fn print_debug(&mut self) {
-        let opcode = Opcode::from(self.bus.mem_peek(self.pc));
+    fn print_debug(&mut self, bus: &mut T) {
+        let opcode = Opcode::from(bus.mem_peek(self.pc));
         let opcode_info = opcode.info();
 
         let (op_asm, op_bytes) = if opcode_info.len == 1 {
             ("".to_string(), "".to_string())
         } else if opcode_info.len == 2 {
-            let val = self.bus.mem_peek(self.pc + 1);
+            let val = bus.mem_peek(self.pc + 1);
             (format!("{val:02X}H"), format!(" {val:02X}"))
         } else {
-            let val1 = self.bus.mem_peek(self.pc + 1);
-            let val2 = self.bus.mem_peek(self.pc + 2);
+            let val1 = bus.mem_peek(self.pc + 1);
+            let val2 = bus.mem_peek(self.pc + 2);
             (
                 format!("{:04X}H", u16::from_le_bytes([val1, val2,])),
                 format!(" {val1:02X} {val2:02X}"),
@@ -586,8 +568,8 @@ impl<T: BusHandler> grok_dbg::DebugHandler for Cpu<T> {
         );
     }
 
-    fn step(&mut self) -> usize {
-        self.step();
+    fn step(&mut self, bus: &mut T) -> usize {
+        self.step(bus);
         self.pc as usize
     }
 }

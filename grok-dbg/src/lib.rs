@@ -1,3 +1,4 @@
+use grok_bus::BusHandler;
 use std::{collections::HashSet, io::Write};
 
 fn addr_from_str(addr: &str) -> Result<usize, std::num::ParseIntError> {
@@ -5,36 +6,38 @@ fn addr_from_str(addr: &str) -> Result<usize, std::num::ParseIntError> {
     usize::from_str_radix(addr, 16)
 }
 
-pub trait DebugHandler {
-    fn step(&mut self) -> usize;
-    fn print_debug(&mut self);
-    fn peek(&mut self, addr: usize) -> u8;
+pub trait DebugHandler<B: BusHandler> {
+    fn step(&mut self, bus: &mut B) -> usize;
+    fn print_debug(&mut self, bus: &mut B);
+    fn peek(&mut self, bus: &mut B, addr: usize) -> u8;
 }
 
-pub struct Debugger<T: DebugHandler> {
+pub struct Debugger<B: BusHandler, T: DebugHandler<B>> {
     target: T,
     brk: HashSet<usize>,
     exit: bool,
+    _bus: std::marker::PhantomData<B>,
 }
 
-impl<T: DebugHandler> Debugger<T> {
+impl<B: BusHandler, T: DebugHandler<B>> Debugger<B, T> {
     pub fn new(dbg: T) -> Self {
         Self {
             target: dbg,
             brk: HashSet::new(),
             exit: false,
+            _bus: std::marker::PhantomData,
         }
     }
 
-    pub fn start(&mut self) {
+    pub fn start(&mut self, bus: &mut B) {
         println!("grok-dbg");
         println!("© Grok the planet!\n");
         println!("Enter 'help' for a list of commands\n");
 
         while !self.exit {
-            self.target.print_debug();
+            self.target.print_debug(bus);
             let words = self.get_input();
-            self.process_input(words);
+            self.process_input(bus, words);
             println!();
         }
     }
@@ -47,9 +50,9 @@ impl<T: DebugHandler> Debugger<T> {
         self.brk.remove(&addr);
     }
 
-    fn continue_bp(&mut self) {
+    fn continue_bp(&mut self, bus: &mut B) {
         loop {
-            let addr = self.target.step();
+            let addr = self.target.step(bus);
             if self.brk.contains(&addr) {
                 break;
             }
@@ -68,7 +71,7 @@ impl<T: DebugHandler> Debugger<T> {
             .collect::<Vec<String>>()
     }
 
-    fn process_input(&mut self, words: Vec<String>) {
+    fn process_input(&mut self, bus: &mut B, words: Vec<String>) {
         let words: Vec<&str> = words.iter().map(|s| s.as_str()).collect();
         if words.is_empty() {
             return;
@@ -89,14 +92,14 @@ impl<T: DebugHandler> Debugger<T> {
             ["showbp"] => todo!(),
             ["peek", addr] => {
                 if let Ok(addr) = addr_from_str(addr) {
-                    println!("{:04X}={:02X}", addr, self.target.peek(addr));
+                    println!("{:04X}={:02X}", addr, self.target.peek(bus, addr));
                 }
             }
             ["step"] | ["s"] | ["next"] | ["n"] => {
-                self.target.step();
+                self.target.step(bus);
             }
             ["continue"] | ["c"] => {
-                self.continue_bp();
+                self.continue_bp(bus);
             }
             ["exit"] => {
                 self.exit = true;

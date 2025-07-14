@@ -1,5 +1,5 @@
 [workspace]
 resolver = "3"
-members = ["grok-cpu/*", "grok-dbg"]
+members = ["grok-bus", "grok-cpu/*", "grok-dbg", "grok-spinv"]
 
 [workspace.dependencies]

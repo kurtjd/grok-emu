@@ -1,9 +1,8 @@
 [package]
-name = "grok-dbg"
+name = "grok-bus"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/kurtjd/grok-emu"
 
 [dependencies]
-grok-bus = { path = "../grok-bus" }

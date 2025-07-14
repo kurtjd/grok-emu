@@ -16,3 +16,4 @@ sm83 = []
 bitflags = "2.9.1"
 num_enum = "0.7.4"
 grok-dbg = { path = "../../grok-dbg" }
+grok-bus = { path = "../../grok-bus" }

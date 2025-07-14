@@ -1,4 +1,5 @@
-use grok_80::{BusHandler, Cpu};
+use grok_80::Cpu;
+use grok_bus::BusHandler;
 use grok_dbg::Debugger;
 use std::io::{Read, Write};
 
@@ -77,9 +78,9 @@ fn main() {
         bus.mem_load(0x00, include_bytes!("../roms/CPM.bin"));
     }
 
-    let mut cpu = Cpu::new(bus);
+    let mut cpu: Cpu<Bus> = Cpu::new();
     cpu.reset(load_addr);
     let mut dbg = Debugger::new(cpu);
 
-    dbg.start();
+    dbg.start(&mut bus);
 }

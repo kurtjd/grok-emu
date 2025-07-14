@@ -1,7 +1,8 @@
-use grok_80::{BusHandler, Cpu, Opcode};
+use grok_80::{Cpu, Opcode};
+use grok_bus::BusHandler;
 
 struct Bus {
-    ram: [u8; u16::MAX as usize + 1],
+    ram: [u8; 0x10000],
     output: String,
     exit: bool,
 }
@@ -9,7 +10,7 @@ struct Bus {
 impl Bus {
     fn new() -> Self {
         Self {
-            ram: [0; u16::MAX as usize + 1],
+            ram: [0; 0x10000],
             output: String::new(),
             exit: false,
         }
@@ -62,14 +63,13 @@ fn run_test(rom: &[u8]) -> bool {
     // Test ROMs expect to be loaded at 0x100
     bus.mem_load(0x100, rom);
 
-    let mut cpu = Cpu::new(bus);
+    let mut cpu: Cpu<Bus> = Cpu::new();
     cpu.reset(0x100);
 
-    while !cpu.bus().exit {
-        cpu.step();
+    while !bus.exit {
+        cpu.step(&mut bus);
     }
 
-    let bus = cpu.destroy();
     !bus.output.contains("FAILED") && !bus.output.contains("ERROR")
 }
 
