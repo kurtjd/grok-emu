@@ -1,10 +1,11 @@
 mod mcycles;
-mod opcode;
+mod opcodes;
+mod opcodes_cb;
 //#[cfg(test)]
 mod test_helpers;
 
-use crate::opcode::Opcode;
 use grok_bus::BusHandlerZ80;
+use opcodes::Opcode;
 use std::marker::PhantomData;
 
 type TCycles = u64;
@@ -66,6 +67,7 @@ pub struct Registers {
     pub wpr: Wpr,
     // Instruction register
     pub ir: u8,
+    pub ir_pre: u8,
 }
 
 #[derive(Default, Copy, Clone, Debug)]
@@ -111,7 +113,9 @@ impl<B: BusHandlerZ80> Cpu<B> {
         match self.tcycle {
             1 => self.fetch_t1(bus),
             2 => self.fetch_t2(bus),
-            3 => self.fetch_t3(bus),
+            3 => {
+                self.reg.ir = self.fetch_t3(bus);
+            }
             4 => {
                 self.fetch_t4(bus);
                 self.execute(Opcode::from(self.reg.ir), bus);

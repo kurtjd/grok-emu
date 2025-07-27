@@ -1,4 +1,5 @@
-use crate::{BusHandlerZ80, Cpu};
+use crate::{BusHandlerZ80, Cpu, opcodes_cb::OpcodeCB};
+use std::mem::swap;
 
 #[derive(Copy, Clone, Debug, num_enum::FromPrimitive)]
 #[repr(u8)]
@@ -13,7 +14,7 @@ pub enum Opcode {
     DCR_B,
     MVI_B,
     RLC,
-    UNDEF_1,
+    EX_AF_AF,
     DAD_B,
     LDAX_B,
     DCX_B,
@@ -208,7 +209,7 @@ pub enum Opcode {
     RZ,
     RET,
     JZ,
-    UNDEF_8,
+    PREFIX_CB,
     CZ,
     CALL,
     ACI,
@@ -222,7 +223,7 @@ pub enum Opcode {
     SUI,
     RST_2,
     RC,
-    UNDEF_9,
+    EXX,
     JC,
     IN,
     CC,
@@ -266,6 +267,28 @@ pub enum Opcode {
 impl<B: BusHandlerZ80> Cpu<B> {
     pub(crate) fn execute(&mut self, opcode: Opcode, bus: &mut B) {
         match opcode {
+            Opcode::PREFIX_CB => match self.tcycle {
+                4 => {}
+                5 => self.fetch_t1(bus),
+                6 => self.fetch_t2(bus),
+                7 => {
+                    self.reg.ir_pre = self.fetch_t3(bus);
+                }
+                8 => {
+                    self.fetch_t4(bus);
+                    self.execute_prefix_cb(OpcodeCB::from(self.reg.ir_pre), bus);
+                }
+                _ => self.execute_prefix_cb(OpcodeCB::from(self.reg.ir_pre), bus),
+            },
+            Opcode::EXX => {
+                swap(&mut self.reg.gpr.b, &mut self.reg.gpr_alt.b);
+                swap(&mut self.reg.gpr.c, &mut self.reg.gpr_alt.c);
+                swap(&mut self.reg.gpr.d, &mut self.reg.gpr_alt.d);
+                swap(&mut self.reg.gpr.e, &mut self.reg.gpr_alt.e);
+                swap(&mut self.reg.gpr.h, &mut self.reg.gpr_alt.h);
+                swap(&mut self.reg.gpr.l, &mut self.reg.gpr_alt.l);
+                self.end_instruction(bus);
+            }
             Opcode::MOV_B_C => {
                 self.reg.gpr.b = self.reg.gpr.c;
                 self.end_instruction(bus);
@@ -286,9 +309,9 @@ impl<B: BusHandlerZ80> Cpu<B> {
             Opcode::MOV_M_B => match self.tcycle {
                 5 => {
                     let addr = self.reg_pair(self.reg.gpr.h, self.reg.gpr.l);
-                    self.mem_wr_t1(bus, addr, self.reg.gpr.b);
+                    self.mem_wr_t1(bus, addr);
                 }
-                6 => self.mem_wr_t2(bus),
+                6 => self.mem_wr_t2(bus, self.reg.gpr.b),
                 7 => {
                     self.mem_wr_t3(bus);
                     self.end_instruction(bus);
@@ -329,19 +352,19 @@ impl<B: BusHandlerZ80> Cpu<B> {
                 }
                 8 => {
                     let port = self.reg.wpr.z;
-                    self.io_wr_t1(bus, port, self.reg.gpr.a);
+                    self.io_wr_t1(bus, port);
                     self.reg.wpr.w = self.reg.gpr.a;
                     self.reg.wpr.z = port + 1;
                 }
                 9 => self.io_wr_t2(bus),
-                10 => self.io_wr_t3(bus),
+                10 => self.io_wr_t3(bus, self.reg.gpr.a),
                 11 => {
                     self.io_wr_t4(bus);
                     self.end_instruction(bus);
                 }
                 _ => {}
             },
-            _ => todo!(),
+            _ => todo!("Opcode: {:?}", opcode),
         }
     }
 }
