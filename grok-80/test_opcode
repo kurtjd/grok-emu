@@ -1,0 +1,3 @@
+#/bin/bash
+name=$(cargo test --test cpu -- --list | grep "tests_${1}_json" | awk -F': ' '{print $1}')
+cargo test --test cpu "$name"

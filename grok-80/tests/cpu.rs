@@ -1,7 +1,6 @@
-#![allow(dead_code)]
-
-use grok_80::{Cpu, Gpr, Interrupts, Registers, Spr, Wpr};
+use grok_80::{Cpu, Interrupts, Registers};
 use grok_bus::{BusHandlerZ80, BusZ80};
+use rstest::*;
 use serde::Deserialize;
 use std::path::PathBuf;
 
@@ -81,30 +80,29 @@ struct TestCpu {
 impl From<&Cpu<BusZ80>> for TestCpu {
     fn from(cpu: &Cpu<BusZ80>) -> Self {
         let reg = cpu.reg();
-        let wz = u16::from_be_bytes([reg.wpr.w, reg.wpr.z]);
-        let af_ = u16::from_be_bytes([reg.gpr_alt.a, reg.gpr_alt.f]);
-        let bc_ = u16::from_be_bytes([reg.gpr_alt.b, reg.gpr_alt.c]);
-        let de_ = u16::from_be_bytes([reg.gpr_alt.d, reg.gpr_alt.e]);
-        let hl_ = u16::from_be_bytes([reg.gpr_alt.h, reg.gpr_alt.l]);
+        let af_ = u16::from_be_bytes([reg.a_, reg.f_]);
+        let bc_ = u16::from_be_bytes([reg.b_, reg.c_]);
+        let de_ = u16::from_be_bytes([reg.d_, reg.e_]);
+        let hl_ = u16::from_be_bytes([reg.h_, reg.l_]);
         let int = cpu.int();
 
         Self {
-            pc: reg.spr.pc,
-            sp: reg.spr.sp,
-            a: reg.gpr.a,
-            b: reg.gpr.b,
-            c: reg.gpr.c,
-            d: reg.gpr.d,
-            e: reg.gpr.e,
-            f: reg.gpr.f,
-            h: reg.gpr.h,
-            l: reg.gpr.l,
-            i: reg.spr.i,
-            r: reg.spr.r,
+            pc: reg.pc,
+            sp: reg.sp,
+            a: reg.a,
+            b: reg.b,
+            c: reg.c,
+            d: reg.d,
+            e: reg.e,
+            f: reg.f,
+            h: reg.h,
+            l: reg.l,
+            i: reg.i,
+            r: reg.r,
             ei: int.ei as u8,
-            wz,
-            ix: reg.spr.ix,
-            iy: reg.spr.iy,
+            wz: reg.wz,
+            ix: reg.ix,
+            iy: reg.iy,
             af_,
             bc_,
             de_,
@@ -120,51 +118,46 @@ impl From<&Cpu<BusZ80>> for TestCpu {
 
 impl From<&TestCpu> for Cpu<BusZ80> {
     fn from(test_cpu: &TestCpu) -> Self {
-        let gpr = Gpr {
+        let [a_, f_] = test_cpu.af_.to_be_bytes();
+        let [b_, c_] = test_cpu.bc_.to_be_bytes();
+        let [d_, e_] = test_cpu.de_.to_be_bytes();
+        let [h_, l_] = test_cpu.hl_.to_be_bytes();
+
+        let reg = Registers {
+            pc: test_cpu.pc,
+            sp: test_cpu.sp,
+
             a: test_cpu.a,
+            a_,
+
             f: test_cpu.f,
+            f_,
+
             b: test_cpu.b,
             c: test_cpu.c,
             d: test_cpu.d,
             e: test_cpu.e,
             h: test_cpu.h,
             l: test_cpu.l,
-        };
+            b_,
+            c_,
+            d_,
+            e_,
+            h_,
+            l_,
 
-        let [a_, f_] = test_cpu.af_.to_be_bytes();
-        let [b_, c_] = test_cpu.bc_.to_be_bytes();
-        let [d_, e_] = test_cpu.de_.to_be_bytes();
-        let [h_, l_] = test_cpu.hl_.to_be_bytes();
-        let gpr_alt = Gpr {
-            a: a_,
-            f: f_,
-            b: b_,
-            c: c_,
-            d: d_,
-            e: e_,
-            h: h_,
-            l: l_,
-        };
-
-        let spr = Spr {
-            pc: test_cpu.pc,
-            sp: test_cpu.sp,
             ix: test_cpu.ix,
             iy: test_cpu.iy,
+
             i: test_cpu.i,
             r: test_cpu.r,
-        };
 
-        let [w, z] = test_cpu.wz.to_be_bytes();
-        let wpr = Wpr { w, z };
+            wz: test_cpu.wz,
 
-        let reg = Registers {
-            spr,
-            gpr,
-            gpr_alt,
-            wpr,
             ir: 0,
             ir_pre: 0,
+
+            tmp: [0x00; 2],
         };
 
         let int = Interrupts {
@@ -337,7 +330,7 @@ fn test_ports_state(ports: &Ports, test: &Test) {
         let expected = test_ports.data;
         assert!(
             actual == expected,
-            "\nTest {}, Ports @ {}:\nActual: {}\nExpected: {}\n",
+            "\nTest {}, Port @ {}:\nActual: {}\nExpected: {}\n",
             test.name,
             test_ports.addr,
             actual,
@@ -374,37 +367,7 @@ fn test_instruction(path: &PathBuf) {
     }
 }
 
-#[test]
-fn cpu_test_41() {
-    test_instruction(&PathBuf::from("tests/single-step-tests/41.json"));
-}
-
-#[test]
-fn cpu_test_46() {
-    test_instruction(&PathBuf::from("tests/single-step-tests/46.json"));
-}
-
-#[test]
-fn cpu_test_70() {
-    test_instruction(&PathBuf::from("tests/single-step-tests/70.json"));
-}
-
-#[test]
-fn cpu_test_db() {
-    test_instruction(&PathBuf::from("tests/single-step-tests/db.json"));
-}
-
-#[test]
-fn cpu_test_d3() {
-    test_instruction(&PathBuf::from("tests/single-step-tests/d3.json"));
-}
-
-#[test]
-fn cpu_test_d9() {
-    test_instruction(&PathBuf::from("tests/single-step-tests/d9.json"));
-}
-
-#[test]
-fn cpu_test_cb_80() {
-    test_instruction(&PathBuf::from("tests/single-step-tests/cb 80.json"));
+#[rstest]
+fn cpu_test(#[files("tests/single-step-tests/*.json")] path: PathBuf) {
+    test_instruction(&path);
 }

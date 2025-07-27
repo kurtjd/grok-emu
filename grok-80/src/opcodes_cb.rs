@@ -13,7 +13,7 @@ impl<B: BusHandlerZ80> Cpu<B> {
     pub(crate) fn execute_prefix_cb(&mut self, opcode: OpcodeCB, bus: &mut B) {
         match opcode {
             OpcodeCB::RES_0_B => {
-                self.reg.gpr.b &= !(1 << 0);
+                self.reg.b &= !(1 << 0);
                 self.end_instruction(bus);
             }
         }
