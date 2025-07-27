@@ -1,5 +1,8 @@
 [workspace]
 resolver = "3"
-members = ["grok-bus", "grok-80", "grok-dbg", "grok-spinv"]
+members = ["grok-bus", "grok-80"]
+
+[profile.dev.package.grok-80]
+overflow-checks = false
 
 [workspace.dependencies]

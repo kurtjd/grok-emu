@@ -1,4 +1,5 @@
 target/
+grok-80/tests/opcodes/
 .vscode
 notes.txt
 Cargo.lock
