@@ -14,7 +14,7 @@ impl<B: BusHandlerZ80> Cpu<B> {
         match opcode {
             OpcodeCB::RES_0_B => {
                 self.reg.b &= !(1 << 0);
-                self.end_instruction(bus);
+                self.end_instruction(bus, false);
             }
         }
     }

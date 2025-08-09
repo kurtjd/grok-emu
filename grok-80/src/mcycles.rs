@@ -37,6 +37,11 @@ impl<B: BusHandlerZ80> Cpu<B> {
         bus.set_addr(addr);
     }
 
+    pub(crate) fn mem_rd_t1_imm(&mut self, bus: &mut B) {
+        self.mem_rd_t1(bus, self.reg.pc);
+        self.reg.pc += 1;
+    }
+
     pub(crate) fn mem_rd_t2(&mut self, bus: &mut B) {
         bus.set_mreq(true);
         bus.set_rd(true);
@@ -105,9 +110,5 @@ impl<B: BusHandlerZ80> Cpu<B> {
         bus.set_iorq(false);
         bus.set_wr(false);
         self.check_wait(bus);
-    }
-
-    pub(crate) fn end_instruction(&mut self, _bus: &mut B) {
-        self.tcycle = 0;
     }
 }

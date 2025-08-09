@@ -1,3 +1,4 @@
+mod flags;
 mod mcycles;
 mod opcodes;
 mod opcodes_cb;
@@ -9,6 +10,28 @@ use opcodes::Opcode;
 use std::marker::PhantomData;
 
 type TCycles = u64;
+
+bitflags::bitflags! {
+    #[derive(Default, Debug, Copy, Clone, PartialEq)]
+    pub struct Flags: u8 {
+        // Carry
+        const C = (1 << 0);
+        // Add/subtract
+        const N = (1 << 1);
+        // Parity/overflow
+        const P = (1 << 2);
+        // Undocumented X
+        const X = (1 << 3);
+        // Half-carry
+        const H = (1 << 4);
+        // Undocumented Y
+        const Y = (1 << 5);
+        // Zero
+        const Z = (1 << 6);
+        // Sign
+        const S = (1 << 7);
+    }
+}
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum Reg {
@@ -51,9 +74,9 @@ pub struct Registers {
     pub a_: u8,
 
     /// Status flags
-    pub f: u8,
+    pub f: Flags,
     /// Alternate status flags
-    pub f_: u8,
+    pub f_: Flags,
 
     /// GPR B
     pub b: u8,
@@ -102,13 +125,16 @@ pub struct Registers {
 
     /// Temporary registers
     pub tmp: [u8; 2],
+
+    /// If the last instruction modified flags, contains flags value
+    pub q: u8,
 }
 
 impl Registers {
     fn get(&self, reg: Reg) -> u8 {
         match reg {
             Reg::A => self.a,
-            Reg::F => self.f,
+            Reg::F => self.f.bits(),
             Reg::B => self.b,
             Reg::C => self.c,
             Reg::D => self.d,
@@ -120,7 +146,7 @@ impl Registers {
 
     fn get_pair(&self, reg_pair: RegPair) -> u16 {
         match reg_pair {
-            RegPair::AF => u16::from_be_bytes([self.a, self.f]),
+            RegPair::AF => u16::from_be_bytes([self.a, self.f.bits()]),
             RegPair::BC => u16::from_be_bytes([self.b, self.c]),
             RegPair::DE => u16::from_be_bytes([self.d, self.e]),
             RegPair::HL => u16::from_be_bytes([self.h, self.l]),
@@ -131,7 +157,7 @@ impl Registers {
     fn set(&mut self, reg: Reg, val: u8) {
         match reg {
             Reg::A => self.a = val,
-            Reg::F => self.f = val,
+            Reg::F => self.f = Flags::from_bits_retain(val),
             Reg::B => self.b = val,
             Reg::C => self.c = val,
             Reg::D => self.d = val,
@@ -141,14 +167,14 @@ impl Registers {
         }
     }
 
-    fn _set_pair(&mut self, reg_pair: RegPair, val: u16) {
-        let val_bytes = val.to_be_bytes();
+    fn set_pair(&mut self, reg_pair: RegPair, val: u16) {
+        let bytes = val.to_be_bytes();
 
         match reg_pair {
-            RegPair::AF => [self.a, self.f] = val_bytes,
-            RegPair::BC => [self.b, self.c] = val_bytes,
-            RegPair::DE => [self.d, self.e] = val_bytes,
-            RegPair::HL => [self.h, self.l] = val_bytes,
+            RegPair::AF => (self.a, self.f) = (bytes[0], Flags::from_bits_retain(bytes[1])),
+            RegPair::BC => [self.b, self.c] = bytes,
+            RegPair::DE => [self.d, self.e] = bytes,
+            RegPair::HL => [self.h, self.l] = bytes,
             RegPair::SP => self.sp = val,
         }
     }
@@ -191,11 +217,15 @@ pub struct Interrupts {
     pub iff2: bool,
     /// Interrupt mode
     pub im: u8,
+    /// Tracks if LD A, i or LD A, r was last executed instruction
+    /// If so, P flag reset during interrupt handling
+    pub p: bool,
 }
 
 pub struct Cpu<B: BusHandlerZ80> {
     reg: Registers,
     int: Interrupts,
+    halt: bool,
     tcycle: TCycles,
     bus: PhantomData<B>,
 }
@@ -212,6 +242,7 @@ impl<B: BusHandlerZ80> Cpu<B> {
         Self {
             reg: Registers::default(),
             int: Interrupts::default(),
+            halt: false,
             tcycle: 0,
             bus: PhantomData,
         }
@@ -219,17 +250,16 @@ impl<B: BusHandlerZ80> Cpu<B> {
 
     /// Advances the CPU one T-cycle
     pub fn tick(&mut self, bus: &mut B) {
-        if self.tcycle == 0 {
-            if bus.nmi() {
-                self.handle_nmi(bus);
-            } else if !self.int.ei && self.int.iff1 && bus.int() {
-                self.handle_int(bus);
-            }
-            self.int.ei = false;
-        }
-
+        // TODO: Check for Some(int_opcode) and if is Some, execute instead of fetch
+        // Also clear int line?
+        // TODO: Also handle HALT state
+        self.int.ei = false;
+        self.int.p = false;
         self.tcycle += 1;
+        self.fetch_execute(bus);
+    }
 
+    fn fetch_execute(&mut self, bus: &mut B) {
         match self.tcycle {
             1 => self.fetch_t1(bus),
             2 => self.fetch_t2(bus),
@@ -254,12 +284,16 @@ impl<B: BusHandlerZ80> Cpu<B> {
             2 => todo!("Handle IM2 interrupt"),
             _ => panic!("Invalid interrupt mode encountered!"),
         }
+
+        // TODO: Store Some(int_opcode) tick() checks next cycle
     }
 
     fn handle_nmi(&mut self, _bus: &mut B) {
         self.int.iff2 = self.int.iff1;
         self.int.iff1 = false;
         todo!("Handle non-maskable interrupt always");
+
+        // TODO: Store Some(int_opcode) tick() checks next cycle
     }
 
     fn check_wait(&mut self, bus: &B) {

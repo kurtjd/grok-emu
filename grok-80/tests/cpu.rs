@@ -1,4 +1,4 @@
-use grok_80::{Cpu, Interrupts, Registers};
+use grok_80::{Cpu, Flags, Interrupts, Registers};
 use grok_bus::{BusHandlerZ80, BusZ80};
 use rstest::*;
 use serde::Deserialize;
@@ -80,7 +80,7 @@ struct TestCpu {
 impl From<&Cpu<BusZ80>> for TestCpu {
     fn from(cpu: &Cpu<BusZ80>) -> Self {
         let reg = cpu.reg();
-        let af_ = u16::from_be_bytes([reg.a_, reg.f_]);
+        let af_ = u16::from_be_bytes([reg.a_, reg.f_.bits()]);
         let bc_ = u16::from_be_bytes([reg.b_, reg.c_]);
         let de_ = u16::from_be_bytes([reg.d_, reg.e_]);
         let hl_ = u16::from_be_bytes([reg.h_, reg.l_]);
@@ -94,7 +94,7 @@ impl From<&Cpu<BusZ80>> for TestCpu {
             c: reg.c,
             d: reg.d,
             e: reg.e,
-            f: reg.f,
+            f: reg.f.bits(),
             h: reg.h,
             l: reg.l,
             i: reg.i,
@@ -108,8 +108,8 @@ impl From<&Cpu<BusZ80>> for TestCpu {
             de_,
             hl_,
             im: int.im,
-            p: 0, // TODO
-            q: 0, // TODO
+            p: cpu.int().p as u8,
+            q: reg.q,
             iff1: int.iff1 as u8,
             iff2: int.iff2 as u8,
         }
@@ -130,8 +130,8 @@ impl From<&TestCpu> for Cpu<BusZ80> {
             a: test_cpu.a,
             a_,
 
-            f: test_cpu.f,
-            f_,
+            f: Flags::from_bits_retain(test_cpu.f),
+            f_: Flags::from_bits_retain(f_),
 
             b: test_cpu.b,
             c: test_cpu.c,
@@ -158,6 +158,8 @@ impl From<&TestCpu> for Cpu<BusZ80> {
             ir_pre: 0,
 
             tmp: [0x00; 2],
+
+            q: test_cpu.q,
         };
 
         let int = Interrupts {
@@ -165,6 +167,7 @@ impl From<&TestCpu> for Cpu<BusZ80> {
             iff1: test_cpu.iff1 == 1,
             iff2: test_cpu.iff2 == 1,
             im: test_cpu.im,
+            p: test_cpu.p == 1,
         };
 
         let mut cpu: Cpu<BusZ80> = Cpu::new();
@@ -291,6 +294,9 @@ fn test_bus_state(bus: &BusZ80, test_bus: &TestBus, test: &Test, cycle: usize) {
 }
 
 fn test_cpu_state(cpu: &Cpu<BusZ80>, test: &Test) {
+    // Make sure we ran all tcycles and reset counter
+    assert_eq!(cpu.tcycle(), 0);
+
     let initial = &test.initial_state.cpu;
     let actual = TestCpu::from(cpu);
     let expected = &test.final_state.cpu;
