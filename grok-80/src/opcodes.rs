@@ -335,8 +335,6 @@ impl<B: BusHandlerZ80> Cpu<B> {
             Opcode::LD_H_N => self.ld_r_n(bus, Reg::H),
             Opcode::LD_L_N => self.ld_r_n(bus, Reg::L),
             Opcode::LD_A_HLi => self.ld_r_rpi(bus, Reg::A, RegPair::HL),
-            Opcode::LD_A_BCi => self.ld_r_rpi(bus, Reg::A, RegPair::BC),
-            Opcode::LD_A_DEi => self.ld_r_rpi(bus, Reg::A, RegPair::DE),
             Opcode::LD_B_HLi => self.ld_r_rpi(bus, Reg::B, RegPair::HL),
             Opcode::LD_C_HLi => self.ld_r_rpi(bus, Reg::C, RegPair::HL),
             Opcode::LD_D_HLi => self.ld_r_rpi(bus, Reg::D, RegPair::HL),
@@ -344,8 +342,6 @@ impl<B: BusHandlerZ80> Cpu<B> {
             Opcode::LD_H_HLi => self.ld_r_rpi(bus, Reg::H, RegPair::HL),
             Opcode::LD_L_HLi => self.ld_r_rpi(bus, Reg::L, RegPair::HL),
             Opcode::LD_HLi_A => self.ld_rpi_r(bus, RegPair::HL, Reg::A),
-            Opcode::LD_BCi_A => self.ld_rpi_r(bus, RegPair::BC, Reg::A),
-            Opcode::LD_DEi_A => self.ld_rpi_r(bus, RegPair::DE, Reg::A),
             Opcode::LD_HLi_B => self.ld_rpi_r(bus, RegPair::HL, Reg::B),
             Opcode::LD_HLi_C => self.ld_rpi_r(bus, RegPair::HL, Reg::C),
             Opcode::LD_HLi_D => self.ld_rpi_r(bus, RegPair::HL, Reg::D),
@@ -353,8 +349,28 @@ impl<B: BusHandlerZ80> Cpu<B> {
             Opcode::LD_HLi_H => self.ld_rpi_r(bus, RegPair::HL, Reg::H),
             Opcode::LD_HLi_L => self.ld_rpi_r(bus, RegPair::HL, Reg::L),
             Opcode::LD_HLi_N => self.ld_hli_n(bus),
+            Opcode::LD_A_BCi => self.ld_r_rpi(bus, Reg::A, RegPair::BC),
+            Opcode::LD_A_DEi => self.ld_r_rpi(bus, Reg::A, RegPair::DE),
             Opcode::LD_A_NNi => self.ld_a_nni(bus),
+            Opcode::LD_BCi_A => self.ld_rpi_r(bus, RegPair::BC, Reg::A),
+            Opcode::LD_DEi_A => self.ld_rpi_r(bus, RegPair::DE, Reg::A),
             Opcode::LD_NNi_A => self.ld_nni_a(bus),
+
+            // 16-Bit Load Group
+            Opcode::LD_BC_NN => self.ld_rr_nn(bus, RegPair::BC),
+            Opcode::LD_DE_NN => self.ld_rr_nn(bus, RegPair::DE),
+            Opcode::LD_HL_NN => self.ld_rr_nn(bus, RegPair::HL),
+            Opcode::LD_SP_NN => self.ld_rr_nn(bus, RegPair::SP),
+            Opcode::LD_NNi_HL => self.ld_nni_hl(bus),
+            Opcode::LD_SP_HL => self.ld_sp_hl(bus),
+            Opcode::PUSH_AF => self.push(bus, RegPair::AF),
+            Opcode::PUSH_BC => self.push(bus, RegPair::BC),
+            Opcode::PUSH_DE => self.push(bus, RegPair::DE),
+            Opcode::PUSH_HL => self.push(bus, RegPair::HL),
+            Opcode::POP_AF => self.pop(bus, RegPair::AF),
+            Opcode::POP_BC => self.pop(bus, RegPair::BC),
+            Opcode::POP_DE => self.pop(bus, RegPair::DE),
+            Opcode::POP_HL => self.pop(bus, RegPair::HL),
 
             // 8-Bit Arithmetic and Logic Group
             Opcode::ADD_A_A => self.alu_r(bus, Reg::A, AluOp::Add),
@@ -718,6 +734,141 @@ impl<B: BusHandlerZ80> Cpu<B> {
             }
             13 => {
                 self.mem_wr_t3(bus);
+                self.end_instruction(bus, false);
+            }
+            _ => {}
+        }
+    }
+
+    // 16-Bit Load Group
+    fn ld_rr_nn(&mut self, bus: &mut B, dst: RegPair) {
+        match self.tcycle {
+            5 => {
+                self.mem_rd_t1_imm(bus);
+            }
+            6 => {
+                self.mem_rd_t2(bus);
+            }
+            7 => {
+                self.reg.tmp[0] = self.mem_rd_t3(bus);
+            }
+            8 => {
+                self.mem_rd_t1_imm(bus);
+            }
+            9 => {
+                self.mem_rd_t2(bus);
+            }
+            10 => {
+                self.reg.tmp[1] = self.mem_rd_t3(bus);
+                let val = u16::from_le_bytes(self.reg.tmp);
+                self.reg.set_pair(dst, val);
+                self.end_instruction(bus, false);
+            }
+            _ => {}
+        }
+    }
+
+    fn ld_nni_hl(&mut self, bus: &mut B) {
+        match self.tcycle {
+            5 => {
+                self.mem_rd_t1_imm(bus);
+            }
+            6 => {
+                self.mem_rd_t2(bus);
+            }
+            7 => {
+                self.reg.tmp[0] = self.mem_rd_t3(bus);
+            }
+            8 => {
+                self.mem_rd_t1_imm(bus);
+            }
+            9 => {
+                self.mem_rd_t2(bus);
+            }
+            10 => {
+                self.reg.tmp[1] = self.mem_rd_t3(bus);
+            }
+            11 => {
+                let addr = u16::from_le_bytes(self.reg.tmp);
+                self.reg.wz = addr + 1;
+                self.mem_wr_t1(bus, addr);
+            }
+            12 => {
+                self.mem_wr_t2(bus, self.reg.l);
+            }
+            13 => {
+                self.mem_wr_t3(bus);
+            }
+            14 => {
+                let addr = u16::from_le_bytes(self.reg.tmp) + 1;
+                self.mem_wr_t1(bus, addr);
+            }
+            15 => {
+                self.mem_wr_t2(bus, self.reg.h);
+            }
+            16 => {
+                self.mem_wr_t3(bus);
+                self.end_instruction(bus, false);
+            }
+            _ => {}
+        }
+    }
+
+    fn ld_sp_hl(&mut self, bus: &mut B) {
+        if self.tcycle() == 6 {
+            self.reg.sp = self.reg.get_pair(RegPair::HL);
+            self.end_instruction(bus, false);
+        }
+    }
+
+    fn push(&mut self, bus: &mut B, src: RegPair) {
+        match self.tcycle {
+            5 => {}
+            6 => {
+                self.reg.tmp = self.reg.get_pair(src).to_le_bytes();
+                self.mem_wr_t1_push(bus);
+            }
+            7 => {
+                self.mem_wr_t2(bus, self.reg.tmp[1]);
+            }
+            8 => {
+                self.mem_wr_t3(bus);
+            }
+            9 => {
+                self.mem_wr_t1_push(bus);
+            }
+            10 => {
+                self.mem_wr_t2(bus, self.reg.tmp[0]);
+            }
+            11 => {
+                self.mem_wr_t3(bus);
+                self.end_instruction(bus, false);
+            }
+            _ => {}
+        }
+    }
+
+    fn pop(&mut self, bus: &mut B, dst: RegPair) {
+        match self.tcycle {
+            5 => {
+                self.mem_rd_t1_pop(bus);
+            }
+            6 => {
+                self.mem_rd_t2(bus);
+            }
+            7 => {
+                self.reg.tmp[0] = self.mem_rd_t3(bus);
+            }
+            8 => {
+                self.mem_rd_t1_pop(bus);
+            }
+            9 => {
+                self.mem_rd_t2(bus);
+            }
+            10 => {
+                self.reg.tmp[1] = self.mem_rd_t3(bus);
+                let val = u16::from_le_bytes(self.reg.tmp);
+                self.reg.set_pair(dst, val);
                 self.end_instruction(bus, false);
             }
             _ => {}
