@@ -42,6 +42,11 @@ impl<B: BusHandlerZ80> Cpu<B> {
         self.reg.pc += 1;
     }
 
+    pub(crate) fn mem_rd_t1_pop(&mut self, bus: &mut B) {
+        self.mem_rd_t1(bus, self.reg.sp);
+        self.reg.sp += 1;
+    }
+
     pub(crate) fn mem_rd_t2(&mut self, bus: &mut B) {
         bus.set_mreq(true);
         bus.set_rd(true);
@@ -56,6 +61,11 @@ impl<B: BusHandlerZ80> Cpu<B> {
 
     pub(crate) fn mem_wr_t1(&mut self, bus: &mut B, addr: u16) {
         bus.set_addr(addr);
+    }
+
+    pub(crate) fn mem_wr_t1_push(&mut self, bus: &mut B) {
+        self.reg.sp -= 1;
+        self.mem_wr_t1(bus, self.reg.sp);
     }
 
     pub(crate) fn mem_wr_t2(&mut self, bus: &mut B, data: u8) {

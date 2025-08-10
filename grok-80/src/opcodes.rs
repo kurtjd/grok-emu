@@ -1,4 +1,4 @@
-use crate::{BusHandlerZ80, Cpu, Flags, Reg, RegPair, opcodes_cb::OpcodeCB};
+use crate::{BusHandlerZ80, Cpu, Flags, Reg, RegPair, TCycles, opcodes_cb::OpcodeCB};
 
 enum AluOp {
     Add,
@@ -215,7 +215,7 @@ pub enum Opcode {
     CALL_NZ_NN,
     PUSH_BC,
     ADD_A_N,
-    RST_0,
+    RST_00H,
     RET_Z,
     RET,
     JP_Z_NN,
@@ -223,7 +223,7 @@ pub enum Opcode {
     CALL_Z_NN,
     CALL_NN,
     ADC_A_N,
-    RST_8,
+    RST_08H,
     RET_NC,
     POP_DE,
     JP_NC_NN,
@@ -496,6 +496,38 @@ impl<B: BusHandlerZ80> Cpu<B> {
             Opcode::JP_HLi => self.jp_hli(bus),
             Opcode::DJNZ_DIS => self.djnz_dis(bus),
 
+            // Call and Return Group
+            Opcode::CALL_NN => self.call(bus, true),
+            Opcode::CALL_NZ_NN => self.call(bus, !self.reg.f.contains(Flags::Z)),
+            Opcode::CALL_Z_NN => self.call(bus, self.reg.f.contains(Flags::Z)),
+            Opcode::CALL_NC_NN => self.call(bus, !self.reg.f.contains(Flags::C)),
+            Opcode::CALL_C_NN => self.call(bus, self.reg.f.contains(Flags::C)),
+            Opcode::CALL_PO_NN => self.call(bus, !self.reg.f.contains(Flags::P)),
+            Opcode::CALL_PE_NN => self.call(bus, self.reg.f.contains(Flags::P)),
+            Opcode::CALL_P_NN => self.call(bus, !self.reg.f.contains(Flags::S)),
+            Opcode::CALL_M_NN => self.call(bus, self.reg.f.contains(Flags::S)),
+            Opcode::RET => self.ret(bus, 5),
+            Opcode::RET_NZ => self.ret_cc(bus, !self.reg.f.contains(Flags::Z)),
+            Opcode::RET_Z => self.ret_cc(bus, self.reg.f.contains(Flags::Z)),
+            Opcode::RET_NC => self.ret_cc(bus, !self.reg.f.contains(Flags::C)),
+            Opcode::RET_C => self.ret_cc(bus, self.reg.f.contains(Flags::C)),
+            Opcode::RET_PO => self.ret_cc(bus, !self.reg.f.contains(Flags::P)),
+            Opcode::RET_PE => self.ret_cc(bus, self.reg.f.contains(Flags::P)),
+            Opcode::RET_P => self.ret_cc(bus, !self.reg.f.contains(Flags::S)),
+            Opcode::RET_M => self.ret_cc(bus, self.reg.f.contains(Flags::S)),
+            Opcode::RST_00H => self.rst(bus, 0x00),
+            Opcode::RST_08H => self.rst(bus, 0x08),
+            Opcode::RST_10H => self.rst(bus, 0x10),
+            Opcode::RST_18H => self.rst(bus, 0x18),
+            Opcode::RST_20H => self.rst(bus, 0x20),
+            Opcode::RST_28H => self.rst(bus, 0x28),
+            Opcode::RST_30H => self.rst(bus, 0x30),
+            Opcode::RST_38H => self.rst(bus, 0x38),
+
+            // Input and Output Group
+            Opcode::IN_A_N => self.in_a_n(bus),
+            Opcode::OUT_N_A => self.out_n_a(bus),
+
             Opcode::PREFIX_CB => match self.tcycle {
                 4 => {}
                 5 => self.fetch_t1(bus),
@@ -519,50 +551,6 @@ impl<B: BusHandlerZ80> Cpu<B> {
                 self.end_instruction(bus, false);
             }
 
-            Opcode::IN_A_N => match self.tcycle {
-                5 => {
-                    self.mem_rd_t1(bus, self.reg.pc);
-                    self.reg.pc += 1;
-                }
-                6 => self.mem_rd_t2(bus),
-                7 => {
-                    self.reg.tmp[0] = self.mem_rd_t3(bus);
-                }
-                8 => {
-                    self.io_rd_t1(bus, self.reg.tmp[0]);
-                    self.reg.wz = bus.addr() + 1;
-                }
-                9 => self.io_rd_t2(bus),
-                10 => self.io_rd_t3(bus),
-                11 => {
-                    self.reg.a = self.io_rd_t4(bus);
-                    self.end_instruction(bus, false);
-                }
-                _ => {}
-            },
-            Opcode::OUT_N_A => match self.tcycle {
-                5 => {
-                    self.mem_rd_t1(bus, self.reg.pc);
-                    self.reg.pc += 1;
-                }
-                6 => self.mem_rd_t2(bus),
-                7 => {
-                    let data = self.mem_rd_t3(bus);
-                    self.reg.tmp[0] = data;
-                }
-                8 => {
-                    let port = self.reg.tmp[0];
-                    self.io_wr_t1(bus, port);
-                    self.reg.wz = u16::from_be_bytes([self.reg.a, port + 1]);
-                }
-                9 => self.io_wr_t2(bus),
-                10 => self.io_wr_t3(bus, self.reg.a),
-                11 => {
-                    self.io_wr_t4(bus);
-                    self.end_instruction(bus, false);
-                }
-                _ => {}
-            },
             _ => todo!("Opcode: {:?}", opcode),
         }
     }
@@ -1066,6 +1054,11 @@ impl<B: BusHandlerZ80> Cpu<B> {
         }
     }
 
+    fn jp_hli(&mut self, bus: &mut B) {
+        self.reg.pc = self.reg.get_pair(RegPair::HL);
+        self.end_instruction(bus, false);
+    }
+
     fn djnz_dis(&mut self, bus: &mut B) {
         match self.tcycle {
             6 => {
@@ -1089,9 +1082,165 @@ impl<B: BusHandlerZ80> Cpu<B> {
         }
     }
 
-    fn jp_hli(&mut self, bus: &mut B) {
-        self.reg.pc = self.reg.get_pair(RegPair::HL);
-        self.end_instruction(bus, false);
+    // Call and Return Group
+    fn call(&mut self, bus: &mut B, cond: bool) {
+        match self.tcycle {
+            5 => {
+                self.mem_rd_t1_imm(bus);
+            }
+            6 => {
+                self.mem_rd_t2(bus);
+            }
+            7 => {
+                self.reg.tmp[0] = self.mem_rd_t3(bus);
+            }
+            8 => {
+                self.mem_rd_t1_imm(bus);
+            }
+            9 => {
+                self.mem_rd_t2(bus);
+            }
+            10 => {
+                self.reg.tmp[1] = self.mem_rd_t3(bus);
+                self.reg.wz = u16::from_le_bytes(self.reg.tmp);
+                if !cond {
+                    self.end_instruction(bus, false);
+                }
+            }
+            11 => {}
+            12 => {
+                self.mem_wr_t1_push(bus);
+            }
+            13 => {
+                self.mem_wr_t2(bus, (self.reg.pc >> 8) as u8);
+            }
+            14 => {
+                self.mem_wr_t3(bus);
+            }
+            15 => {
+                self.mem_wr_t1_push(bus);
+            }
+            16 => {
+                self.mem_wr_t2(bus, self.reg.pc as u8);
+            }
+            17 => {
+                self.mem_wr_t3(bus);
+                self.reg.pc = u16::from_le_bytes(self.reg.tmp);
+                self.end_instruction(bus, false);
+            }
+            _ => {}
+        }
+    }
+
+    fn ret(&mut self, bus: &mut B, start_cycle: TCycles) {
+        match self.tcycle - start_cycle {
+            0 => {
+                self.mem_rd_t1_pop(bus);
+            }
+            1 => {
+                self.mem_rd_t2(bus);
+            }
+            2 => {
+                self.reg.tmp[0] = self.mem_rd_t3(bus);
+            }
+            3 => {
+                self.mem_rd_t1_pop(bus);
+            }
+            4 => {
+                self.mem_rd_t2(bus);
+            }
+            5 => {
+                self.reg.tmp[1] = self.mem_rd_t3(bus);
+                self.reg.pc = u16::from_le_bytes(self.reg.tmp);
+                self.reg.wz = self.reg.pc;
+                self.end_instruction(bus, false);
+            }
+            _ => {}
+        }
+    }
+
+    fn ret_cc(&mut self, bus: &mut B, cond: bool) {
+        if !cond && self.tcycle == 5 {
+            self.end_instruction(bus, false);
+        } else if self.tcycle >= 6 {
+            self.ret(bus, 6);
+        }
+    }
+
+    fn rst(&mut self, bus: &mut B, rst: u16) {
+        match self.tcycle {
+            5 => {}
+            6 => {
+                self.mem_wr_t1_push(bus);
+            }
+            7 => {
+                self.mem_wr_t2(bus, (self.reg.pc >> 8) as u8);
+            }
+            8 => {
+                self.mem_wr_t3(bus);
+            }
+            9 => {
+                self.mem_wr_t1_push(bus);
+            }
+            10 => {
+                self.mem_wr_t2(bus, self.reg.pc as u8);
+            }
+            11 => {
+                self.mem_wr_t3(bus);
+                self.reg.pc = rst;
+                self.reg.wz = rst;
+                self.end_instruction(bus, false);
+            }
+            _ => {}
+        }
+    }
+
+    // Input and Output Group
+    fn in_a_n(&mut self, bus: &mut B) {
+        match self.tcycle {
+            5 => {
+                self.mem_rd_t1_imm(bus);
+            }
+            6 => self.mem_rd_t2(bus),
+            7 => {
+                self.reg.tmp[0] = self.mem_rd_t3(bus);
+            }
+            8 => {
+                self.io_rd_t1(bus, self.reg.tmp[0]);
+                self.reg.wz = bus.addr() + 1;
+            }
+            9 => self.io_rd_t2(bus),
+            10 => self.io_rd_t3(bus),
+            11 => {
+                self.reg.a = self.io_rd_t4(bus);
+                self.end_instruction(bus, false);
+            }
+            _ => {}
+        }
+    }
+
+    fn out_n_a(&mut self, bus: &mut B) {
+        match self.tcycle {
+            5 => {
+                self.mem_rd_t1_imm(bus);
+            }
+            6 => self.mem_rd_t2(bus),
+            7 => {
+                self.reg.tmp[0] = self.mem_rd_t3(bus);
+            }
+            8 => {
+                let port = self.reg.tmp[0];
+                self.io_wr_t1(bus, port);
+                self.reg.wz = u16::from_be_bytes([self.reg.a, port + 1]);
+            }
+            9 => self.io_wr_t2(bus),
+            10 => self.io_wr_t3(bus, self.reg.a),
+            11 => {
+                self.io_wr_t4(bus);
+                self.end_instruction(bus, false);
+            }
+            _ => {}
+        }
     }
 
     pub(crate) fn end_instruction(&mut self, bus: &mut B, flags_updated: bool) {
