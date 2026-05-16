@@ -200,12 +200,13 @@ fn opcode_test(path: &PathBuf) {
 
         // Execute each cycle of opcode
         for (cycle, expected) in t.cycles.iter().enumerate() {
-            // First half cycle
+            // 1st clock phase
             cpu.tick(&mut bus);
             memory.tick(&mut bus);
+            bus.tick();
             test_bus_state(&bus, expected, t, cycle);
 
-            // 2nd half cycle
+            // 2nd clock phase
             cpu.tick(&mut bus);
         }
 

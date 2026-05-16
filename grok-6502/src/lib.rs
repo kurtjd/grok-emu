@@ -107,7 +107,7 @@ struct Registers {
     internal: Internal, // Private registers not used by instructions
 }
 
-/// A half-cycle stepped MOS 6502 emulator.
+/// A clock-phase stepped MOS 6502 emulator.
 #[derive(Default)]
 pub struct Cpu {
     state: State,
@@ -128,7 +128,6 @@ impl Cpu {
     pub fn reset(&mut self) {
         self.state = State::Reset;
         self.hcycle = 0;
-        self.registers.s = 0;
 
         // Disable interrupts flag and extension bit should be set
         self.registers.p = StatusFlags::E | StatusFlags::I;
@@ -139,18 +138,29 @@ impl Cpu {
         self.state = State::Halt;
     }
 
-    /// Advance the CPU state by one half-cycle.
+    /// Advance the CPU state by one clock phase (half-cycle).
     ///
-    /// Bus activity can be observed after the first half-cycle of each cycle,
-    /// for other hardware to react (such as memory placing data on the bus for the CPU to
-    /// read in the second half-cycle).
+    /// Bus activity can be observed after the first clock phase by other hardware
+    /// (such as memory placing data on the bus) which the CPU can then react to
+    /// in the second clock phase.
     pub fn tick(&mut self, bus: &mut dyn Bus) {
-        // Sync should be high for first cycle,
+        // Sync should be active for first cycle,
         // but this gets observed AFTER the first cycle completes,
-        // hence why we set it low (end_instruction sets its high)
+        // hence why we set it inactive (end_instruction sets it active)
         bus.set_sync(false);
-        self.hcycle += 1;
 
+        // An active edge of SO tells us we should set the overflow flag
+        if bus.so_edge() == Some(true) {
+            self.registers.p.insert(StatusFlags::V);
+        }
+
+        // If RDY is inactive and we are on the second clock phase of a read cycle,
+        // we need to pause until it goes active again
+        if !self.hcycle.is_multiple_of(2) && !bus.rdy() && bus.op() == bus::Op::Read {
+            return;
+        }
+
+        self.hcycle += 1;
         match self.state {
             State::Reset => match self.hcycle {
                 // T0 (Dummy fetch)
@@ -202,7 +212,7 @@ impl Cpu {
     fn end_instruction(&mut self, bus: &mut dyn Bus) {
         self.hcycle = 0;
 
-        // Sync pin goes high when next instruction starts (aka when this one ends)
+        // Sync pin goes active when next instruction starts (aka when this one ends)
         bus.set_sync(true);
     }
 
