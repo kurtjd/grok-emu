@@ -177,19 +177,32 @@ fn test_ram_state(memory: &Memory, test: &Test) {
     }
 }
 
+// Reset the CPU (which takes 14 clock phases to complete)
+fn reset_cpu(cpu: &mut Cpu, bus: &mut dyn bus::Bus) {
+    // Toggle reset pin to kick off the reset sequence
+    bus.set_res(true);
+    bus.tick();
+    cpu.tick(bus);
+    bus.set_res(false);
+
+    // Then wait for reset sequence to complete
+    while !bus.sync() {
+        bus.tick();
+        cpu.tick(bus);
+    }
+}
+
 fn opcode_test(path: &PathBuf) {
     let mut bus = bus::SimpleBus::new();
-    let mut memory = Memory::default();
-
-    // CPU starts in reset state which takes 7 cycles to complete
     let mut cpu = Cpu::new();
-    for _ in 0..14 {
-        cpu.tick(&mut bus);
-        memory.tick(&mut bus);
-    }
+    let mut memory = Memory::default();
 
     let tests = parse_test(path);
     for t in &tests {
+        // We overwrite the state below but this ensures we aren't in HALT state
+        // (also just helps sanity check reset logic)
+        reset_cpu(&mut cpu, &mut bus);
+
         // Set the initial state of the CPU
         t.initial_state.cpu.set_state(&mut cpu);
 
@@ -218,9 +231,6 @@ fn opcode_test(path: &PathBuf) {
 
         // Check the final state of RAM
         test_ram_state(&memory, t);
-
-        // Quickly put CPU back in running state (in case JAM put it into halt)
-        cpu.state = State::Run;
     }
 }
 

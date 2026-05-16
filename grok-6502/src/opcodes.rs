@@ -16,7 +16,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::IndX,
     },
     Opcode {
-        instr: Instruction::SingleByte(Cpu::jam),
+        instr: Instruction::Misc(Cpu::jam),
         mode: AddrMode::Imp0,
     },
     Opcode {
@@ -81,7 +81,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::IndY,
     },
     Opcode {
-        instr: Instruction::SingleByte(Cpu::jam),
+        instr: Instruction::Misc(Cpu::jam),
         mode: AddrMode::Imp0,
     },
     Opcode {
@@ -147,7 +147,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::IndX,
     },
     Opcode {
-        instr: Instruction::SingleByte(Cpu::jam),
+        instr: Instruction::Misc(Cpu::jam),
         mode: AddrMode::Imp0,
     },
     Opcode {
@@ -212,7 +212,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::IndY,
     },
     Opcode {
-        instr: Instruction::SingleByte(Cpu::jam),
+        instr: Instruction::Misc(Cpu::jam),
         mode: AddrMode::Imp0,
     },
     Opcode {
@@ -277,7 +277,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::IndX,
     },
     Opcode {
-        instr: Instruction::SingleByte(Cpu::jam),
+        instr: Instruction::Misc(Cpu::jam),
         mode: AddrMode::Imp0,
     },
     Opcode {
@@ -342,7 +342,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::IndY,
     },
     Opcode {
-        instr: Instruction::SingleByte(Cpu::jam),
+        instr: Instruction::Misc(Cpu::jam),
         mode: AddrMode::Imp0,
     },
     Opcode {
@@ -407,7 +407,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::IndX,
     },
     Opcode {
-        instr: Instruction::SingleByte(Cpu::jam),
+        instr: Instruction::Misc(Cpu::jam),
         mode: AddrMode::Imp0,
     },
     Opcode {
@@ -472,7 +472,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::IndY,
     },
     Opcode {
-        instr: Instruction::SingleByte(Cpu::jam),
+        instr: Instruction::Misc(Cpu::jam),
         mode: AddrMode::Imp0,
     },
     Opcode {
@@ -602,7 +602,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::IndY,
     },
     Opcode {
-        instr: Instruction::SingleByte(Cpu::jam),
+        instr: Instruction::Misc(Cpu::jam),
         mode: AddrMode::Imp0,
     },
     Opcode {
@@ -732,7 +732,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::IndY,
     },
     Opcode {
-        instr: Instruction::SingleByte(Cpu::jam),
+        instr: Instruction::Misc(Cpu::jam),
         mode: AddrMode::Imp0,
     },
     Opcode {
@@ -862,7 +862,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::IndY,
     },
     Opcode {
-        instr: Instruction::SingleByte(Cpu::jam),
+        instr: Instruction::Misc(Cpu::jam),
         mode: AddrMode::Imp0,
     },
     Opcode {
@@ -992,7 +992,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::IndY,
     },
     Opcode {
-        instr: Instruction::SingleByte(Cpu::jam),
+        instr: Instruction::Misc(Cpu::jam),
         mode: AddrMode::Imp0,
     },
     Opcode {
@@ -1557,9 +1557,22 @@ impl Cpu {
         self.sbc(res);
         res
     }
-    fn jam(&mut self) {
-        self.registers.pc = self.registers.pc.wrapping_sub(1);
-        self.halt();
+    fn jam(&mut self, bus: &mut dyn Bus) {
+        match self.hcycle {
+            // T1 (Dummy read)
+            3 => bus.start_read(self.registers.pc),
+            4 => (),
+
+            // T2 (Dummy read + halt)
+            5 => bus.start_read(self.registers.pc),
+            6 => {
+                self.state = State::Halt;
+                self.registers.pc = self.registers.pc.wrapping_sub(1);
+                self.end_instruction(bus);
+            }
+
+            _ => unreachable!(),
+        }
     }
     fn las(&mut self, data: u8) {
         let result = data & self.registers.s;

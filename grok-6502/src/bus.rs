@@ -162,7 +162,7 @@ impl Default for SimpleBus {
             addr: 0,
             data: 0,
             op: Op::Write,
-            sync: Pin::new(true),
+            sync: Pin::new(false),
             res: Pin::new(false),
             irq: Pin::new(false),
             nmi: Pin::new(false),
