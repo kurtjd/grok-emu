@@ -70,6 +70,8 @@ pub(crate) enum Instruction {
     Push(fn(&mut Cpu) -> u8),
     Pull(fn(&mut Cpu, data: u8)),
     Jmp(fn(&mut Cpu, addr: u16)),
+    // Annoying edge case because this guy can overwrite the address it is writing to
+    Shr(fn(&mut Cpu) -> u8),
     Misc(fn(&mut Cpu, &mut dyn Bus)),
 }
 
@@ -431,6 +433,16 @@ impl Cpu {
                         10 => self.end_instruction(bus),
                         _ => unreachable!(),
                     },
+                    Instruction::Shr(exec) => match self.hcycle {
+                        // T4 (Execute + write data to (unstable) effective address)
+                        9 => {
+                            let data = exec(self);
+                            let (target, data) = self.shr(base_addr, eff_addr, data);
+                            bus.start_write(target, data);
+                        }
+                        10 => self.end_instruction(bus),
+                        _ => unreachable!(),
+                    },
                     Instruction::Rmw(exec) => match self.hcycle {
                         // T4 (Fetch data at effective address)
                         9 => bus.start_read(eff_addr),
@@ -637,6 +649,16 @@ impl Cpu {
                         11 => {
                             let data = exec(self);
                             bus.start_write(eff_addr, data);
+                        }
+                        12 => self.end_instruction(bus),
+                        _ => unreachable!(),
+                    },
+                    Instruction::Shr(exec) => match self.hcycle {
+                        // T5 (Execute + write data to (unstable) effective address)
+                        11 => {
+                            let data = exec(self);
+                            let (target, data) = self.shr(addr, eff_addr, data);
+                            bus.start_write(target, data);
                         }
                         12 => self.end_instruction(bus),
                         _ => unreachable!(),

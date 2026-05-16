@@ -16,11 +16,11 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::IndX,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::jam),
+        instr: Instruction::SingleByte(Cpu::jam),
         mode: AddrMode::Imp0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::slo),
+        instr: Instruction::Rmw(Cpu::slo),
         mode: AddrMode::IndX,
     },
     Opcode {
@@ -36,7 +36,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::Zpg0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::slo),
+        instr: Instruction::Rmw(Cpu::slo),
         mode: AddrMode::Zpg0,
     },
     Opcode {
@@ -52,7 +52,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::Acm0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::anc),
+        instr: Instruction::Read(Cpu::anc),
         mode: AddrMode::Imm0,
     },
     Opcode {
@@ -68,7 +68,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::Abs0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::slo),
+        instr: Instruction::Rmw(Cpu::slo),
         mode: AddrMode::Abs0,
     },
     // $10-$1F
@@ -81,11 +81,11 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::IndY,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::jam),
+        instr: Instruction::SingleByte(Cpu::jam),
         mode: AddrMode::Imp0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::slo),
+        instr: Instruction::Rmw(Cpu::slo),
         mode: AddrMode::IndY,
     },
     Opcode {
@@ -101,7 +101,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::ZpgX,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::slo),
+        instr: Instruction::Rmw(Cpu::slo),
         mode: AddrMode::ZpgX,
     },
     Opcode {
@@ -117,7 +117,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::Imp0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::slo),
+        instr: Instruction::Rmw(Cpu::slo),
         mode: AddrMode::AbsY,
     },
     Opcode {
@@ -133,7 +133,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::AbsX,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::slo),
+        instr: Instruction::Rmw(Cpu::slo),
         mode: AddrMode::AbsX,
     },
     // $20-$2F
@@ -147,11 +147,11 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::IndX,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::jam),
+        instr: Instruction::SingleByte(Cpu::jam),
         mode: AddrMode::Imp0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::rla),
+        instr: Instruction::Rmw(Cpu::rla),
         mode: AddrMode::IndX,
     },
     Opcode {
@@ -167,7 +167,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::Zpg0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::rla),
+        instr: Instruction::Rmw(Cpu::rla),
         mode: AddrMode::Zpg0,
     },
     Opcode {
@@ -183,7 +183,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::Acm0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::anc),
+        instr: Instruction::Read(Cpu::anc),
         mode: AddrMode::Imm0,
     },
     Opcode {
@@ -199,7 +199,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::Abs0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::rla),
+        instr: Instruction::Rmw(Cpu::rla),
         mode: AddrMode::Abs0,
     },
     // $30-$3F
@@ -212,11 +212,11 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::IndY,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::jam),
+        instr: Instruction::SingleByte(Cpu::jam),
         mode: AddrMode::Imp0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::rla),
+        instr: Instruction::Rmw(Cpu::rla),
         mode: AddrMode::IndY,
     },
     Opcode {
@@ -232,7 +232,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::ZpgX,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::rla),
+        instr: Instruction::Rmw(Cpu::rla),
         mode: AddrMode::ZpgX,
     },
     Opcode {
@@ -248,7 +248,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::Imp0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::rla),
+        instr: Instruction::Rmw(Cpu::rla),
         mode: AddrMode::AbsY,
     },
     Opcode {
@@ -264,7 +264,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::AbsX,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::rla),
+        instr: Instruction::Rmw(Cpu::rla),
         mode: AddrMode::AbsX,
     },
     // $40-$4F
@@ -277,11 +277,11 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::IndX,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::jam),
+        instr: Instruction::SingleByte(Cpu::jam),
         mode: AddrMode::Imp0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::sre),
+        instr: Instruction::Rmw(Cpu::sre),
         mode: AddrMode::IndX,
     },
     Opcode {
@@ -297,7 +297,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::Zpg0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::sre),
+        instr: Instruction::Rmw(Cpu::sre),
         mode: AddrMode::Zpg0,
     },
     Opcode {
@@ -313,7 +313,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::Acm0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::alr),
+        instr: Instruction::Read(Cpu::alr),
         mode: AddrMode::Imm0,
     },
     Opcode {
@@ -329,7 +329,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::Abs0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::sre),
+        instr: Instruction::Rmw(Cpu::sre),
         mode: AddrMode::Abs0,
     },
     // $50-$5F
@@ -342,11 +342,11 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::IndY,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::jam),
+        instr: Instruction::SingleByte(Cpu::jam),
         mode: AddrMode::Imp0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::sre),
+        instr: Instruction::Rmw(Cpu::sre),
         mode: AddrMode::IndY,
     },
     Opcode {
@@ -362,7 +362,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::ZpgX,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::sre),
+        instr: Instruction::Rmw(Cpu::sre),
         mode: AddrMode::ZpgX,
     },
     Opcode {
@@ -378,7 +378,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::Imp0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::sre),
+        instr: Instruction::Rmw(Cpu::sre),
         mode: AddrMode::AbsY,
     },
     Opcode {
@@ -394,7 +394,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::AbsX,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::sre),
+        instr: Instruction::Rmw(Cpu::sre),
         mode: AddrMode::AbsX,
     },
     // $60-$6F
@@ -407,11 +407,11 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::IndX,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::jam),
+        instr: Instruction::SingleByte(Cpu::jam),
         mode: AddrMode::Imp0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::rra),
+        instr: Instruction::Rmw(Cpu::rra),
         mode: AddrMode::IndX,
     },
     Opcode {
@@ -427,7 +427,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::Zpg0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::rra),
+        instr: Instruction::Rmw(Cpu::rra),
         mode: AddrMode::Zpg0,
     },
     Opcode {
@@ -443,7 +443,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::Acm0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::arr),
+        instr: Instruction::Read(Cpu::arr),
         mode: AddrMode::Imm0,
     },
     Opcode {
@@ -459,7 +459,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::Abs0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::rra),
+        instr: Instruction::Rmw(Cpu::rra),
         mode: AddrMode::Abs0,
     },
     // $70-$7F
@@ -472,11 +472,11 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::IndY,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::jam),
+        instr: Instruction::SingleByte(Cpu::jam),
         mode: AddrMode::Imp0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::rra),
+        instr: Instruction::Rmw(Cpu::rra),
         mode: AddrMode::IndY,
     },
     Opcode {
@@ -492,7 +492,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::ZpgX,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::rra),
+        instr: Instruction::Rmw(Cpu::rra),
         mode: AddrMode::ZpgX,
     },
     Opcode {
@@ -508,7 +508,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::Imp0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::rra),
+        instr: Instruction::Rmw(Cpu::rra),
         mode: AddrMode::AbsY,
     },
     Opcode {
@@ -524,7 +524,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::AbsX,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::rra),
+        instr: Instruction::Rmw(Cpu::rra),
         mode: AddrMode::AbsX,
     },
     // $80-$8F
@@ -541,7 +541,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::Imm0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::sax),
+        instr: Instruction::Write(Cpu::sax),
         mode: AddrMode::IndX,
     },
     Opcode {
@@ -557,7 +557,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::Zpg0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::sax),
+        instr: Instruction::Write(Cpu::sax),
         mode: AddrMode::Zpg0,
     },
     Opcode {
@@ -573,7 +573,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::Imp0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::ane),
+        instr: Instruction::Read(Cpu::ane),
         mode: AddrMode::Imm0,
     },
     Opcode {
@@ -589,7 +589,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::Abs0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::sax),
+        instr: Instruction::Write(Cpu::sax),
         mode: AddrMode::Abs0,
     },
     // $90-$9F
@@ -602,11 +602,11 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::IndY,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::jam),
+        instr: Instruction::SingleByte(Cpu::jam),
         mode: AddrMode::Imp0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::sha),
+        instr: Instruction::Shr(Cpu::sha),
         mode: AddrMode::IndY,
     },
     Opcode {
@@ -622,7 +622,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::ZpgY,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::sax),
+        instr: Instruction::Write(Cpu::sax),
         mode: AddrMode::ZpgY,
     },
     Opcode {
@@ -638,11 +638,11 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::Imp0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::tas),
+        instr: Instruction::Shr(Cpu::tas),
         mode: AddrMode::AbsY,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::shy),
+        instr: Instruction::Shr(Cpu::shy),
         mode: AddrMode::AbsX,
     },
     Opcode {
@@ -650,11 +650,11 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::AbsX,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::shx),
+        instr: Instruction::Shr(Cpu::shx),
         mode: AddrMode::AbsY,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::sha),
+        instr: Instruction::Shr(Cpu::sha),
         mode: AddrMode::AbsY,
     },
     // $A0-$AF
@@ -671,7 +671,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::Imm0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::lax),
+        instr: Instruction::Read(Cpu::lax),
         mode: AddrMode::IndX,
     },
     Opcode {
@@ -687,7 +687,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::Zpg0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::lax),
+        instr: Instruction::Read(Cpu::lax),
         mode: AddrMode::Zpg0,
     },
     Opcode {
@@ -703,7 +703,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::Imp0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::lxa),
+        instr: Instruction::Read(Cpu::lxa),
         mode: AddrMode::Imm0,
     },
     Opcode {
@@ -719,7 +719,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::Abs0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::lax),
+        instr: Instruction::Read(Cpu::lax),
         mode: AddrMode::Abs0,
     },
     // $B0-$BF
@@ -732,11 +732,11 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::IndY,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::jam),
+        instr: Instruction::SingleByte(Cpu::jam),
         mode: AddrMode::Imp0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::lax),
+        instr: Instruction::Read(Cpu::lax),
         mode: AddrMode::IndY,
     },
     Opcode {
@@ -752,7 +752,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::ZpgY,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::lax),
+        instr: Instruction::Read(Cpu::lax),
         mode: AddrMode::ZpgY,
     },
     Opcode {
@@ -768,7 +768,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::Imp0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::las),
+        instr: Instruction::Read(Cpu::las),
         mode: AddrMode::AbsY,
     },
     Opcode {
@@ -784,7 +784,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::AbsY,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::lax),
+        instr: Instruction::Read(Cpu::lax),
         mode: AddrMode::AbsY,
     },
     // $C0-$CF
@@ -801,7 +801,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::Imm0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::dcp),
+        instr: Instruction::Rmw(Cpu::dcp),
         mode: AddrMode::IndX,
     },
     Opcode {
@@ -817,7 +817,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::Zpg0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::dcp),
+        instr: Instruction::Rmw(Cpu::dcp),
         mode: AddrMode::Zpg0,
     },
     Opcode {
@@ -833,7 +833,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::Imp0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::sbx),
+        instr: Instruction::Read(Cpu::sbx),
         mode: AddrMode::Imm0,
     },
     Opcode {
@@ -849,7 +849,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::Abs0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::dcp),
+        instr: Instruction::Rmw(Cpu::dcp),
         mode: AddrMode::Abs0,
     },
     // $D0-$DF
@@ -862,11 +862,11 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::IndY,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::jam),
+        instr: Instruction::SingleByte(Cpu::jam),
         mode: AddrMode::Imp0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::dcp),
+        instr: Instruction::Rmw(Cpu::dcp),
         mode: AddrMode::IndY,
     },
     Opcode {
@@ -882,7 +882,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::ZpgX,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::dcp),
+        instr: Instruction::Rmw(Cpu::dcp),
         mode: AddrMode::ZpgX,
     },
     Opcode {
@@ -898,7 +898,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::Imp0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::dcp),
+        instr: Instruction::Rmw(Cpu::dcp),
         mode: AddrMode::AbsY,
     },
     Opcode {
@@ -914,7 +914,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::AbsX,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::dcp),
+        instr: Instruction::Rmw(Cpu::dcp),
         mode: AddrMode::AbsX,
     },
     // $E0-$EF
@@ -931,7 +931,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::Imm0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::isc),
+        instr: Instruction::Rmw(Cpu::isc),
         mode: AddrMode::IndX,
     },
     Opcode {
@@ -947,7 +947,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::Zpg0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::isc),
+        instr: Instruction::Rmw(Cpu::isc),
         mode: AddrMode::Zpg0,
     },
     Opcode {
@@ -963,7 +963,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::Imp0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::usb),
+        instr: Instruction::Read(Cpu::usb),
         mode: AddrMode::Imm0,
     },
     Opcode {
@@ -979,7 +979,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::Abs0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::isc),
+        instr: Instruction::Rmw(Cpu::isc),
         mode: AddrMode::Abs0,
     },
     // $F0-$FF
@@ -992,11 +992,11 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::IndY,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::jam),
+        instr: Instruction::SingleByte(Cpu::jam),
         mode: AddrMode::Imp0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::isc),
+        instr: Instruction::Rmw(Cpu::isc),
         mode: AddrMode::IndY,
     },
     Opcode {
@@ -1012,7 +1012,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::ZpgX,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::isc),
+        instr: Instruction::Rmw(Cpu::isc),
         mode: AddrMode::ZpgX,
     },
     Opcode {
@@ -1028,7 +1028,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::Imp0,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::isc),
+        instr: Instruction::Rmw(Cpu::isc),
         mode: AddrMode::AbsY,
     },
     Opcode {
@@ -1044,7 +1044,7 @@ pub(crate) static OPCODES: [Opcode; 0x100] = [
         mode: AddrMode::AbsX,
     },
     Opcode {
-        instr: Instruction::Misc(Cpu::isc),
+        instr: Instruction::Rmw(Cpu::isc),
         mode: AddrMode::AbsX,
     },
 ];
@@ -1499,67 +1499,146 @@ impl Cpu {
     }
 
     // Illegal
-    fn alr(&mut self, _bus: &mut dyn Bus) {
-        todo!()
+    // Reference: https://www.masswerk.at/nowgobang/2021/6502-illegal-opcodes
+    fn alr(&mut self, data: u8) {
+        self.and(data);
+        self.registers.a = self.lsr(self.registers.a);
     }
-    fn anc(&mut self, _bus: &mut dyn Bus) {
-        todo!()
+    fn anc(&mut self, data: u8) {
+        self.and(data);
+        self.registers
+            .p
+            .set(StatusFlags::C, self.registers.a & 0x80 != 0);
     }
-    fn ane(&mut self, _bus: &mut dyn Bus) {
-        todo!()
+    fn ane(&mut self, data: u8) {
+        /* This is a highly unstable operation with non-deterministic behavior in reality.
+        Things like temperature can affect the value of this 'magic' constant! However, 0xEE
+        seems to be the most common result for 'magic' and is the constant used in
+        Tom Harte's tests. */
+        const MAGIC: u8 = 0xEE;
+        self.registers.a = (self.registers.a | MAGIC) & self.registers.x;
+        self.and(data);
     }
-    fn arr(&mut self, _bus: &mut dyn Bus) {
-        todo!()
+    fn arr(&mut self, data: u8) {
+        self.and(data);
+        let and_res = self.registers.a;
+        self.registers.a = self.ror(self.registers.a);
+        let ror_res = self.registers.a;
+
+        // Overflow is set based on XOR of bits 6 and 5 of result
+        self.registers
+            .p
+            .set(StatusFlags::V, ((ror_res >> 6) ^ (ror_res >> 5)) & 1 != 0);
+
+        // This instruction uses ADC circuitry, so decimal mode requires fixups
+        if self.registers.p.contains(StatusFlags::D) {
+            let mut result = (ror_res & 0x0F) + if and_res & 0x0F > 4 { 6 } else { 0 };
+            result = (result & 0x0F) | (ror_res & 0xF0);
+
+            if and_res & 0xF0 > 0x40 {
+                result = result.wrapping_add(0x60);
+            }
+
+            self.registers.p.set(StatusFlags::C, and_res & 0xF0 > 0x40);
+            self.registers.a = result;
+        } else {
+            self.registers
+                .p
+                .set(StatusFlags::C, ror_res & (1 << 6) != 0);
+        }
     }
-    fn dcp(&mut self, _bus: &mut dyn Bus) {
-        todo!()
+    fn dcp(&mut self, data: u8) -> u8 {
+        let res = self.dec(data);
+        self.cmp(res);
+        res
     }
-    fn isc(&mut self, _bus: &mut dyn Bus) {
-        todo!()
+    fn isc(&mut self, data: u8) -> u8 {
+        let res = self.inc(data);
+        self.sbc(res);
+        res
     }
-    fn jam(&mut self, _bus: &mut dyn Bus) {
+    fn jam(&mut self) {
+        self.registers.pc = self.registers.pc.wrapping_sub(1);
         self.halt();
     }
-    fn las(&mut self, _bus: &mut dyn Bus) {
-        todo!()
+    fn las(&mut self, data: u8) {
+        let result = data & self.registers.s;
+        self.registers.a = result;
+        self.registers.x = result;
+        self.registers.s = result;
+        self.update_zn_flags(result);
     }
-    fn lax(&mut self, _bus: &mut dyn Bus) {
-        todo!()
+    fn lax(&mut self, data: u8) {
+        self.lda(data);
+        self.ldx(data);
     }
-    fn lxa(&mut self, _bus: &mut dyn Bus) {
-        todo!()
+    fn lxa(&mut self, data: u8) {
+        /* This is a highly unstable operation with non-deterministic behavior in reality.
+        Things like temperature can affect the value of this 'magic' constant! However, 0xEE
+        seems to be the most common result for 'magic' and is the constant used in
+        Tom Harte's tests. */
+        const MAGIC: u8 = 0xEE;
+        self.registers.a |= MAGIC;
+        self.and(data);
+        self.registers.x = self.registers.a;
     }
-    fn rla(&mut self, _bus: &mut dyn Bus) {
-        todo!()
+    fn rla(&mut self, data: u8) -> u8 {
+        let res = self.rol(data);
+        self.and(res);
+        res
     }
-    fn rra(&mut self, _bus: &mut dyn Bus) {
-        todo!()
+    fn rra(&mut self, data: u8) -> u8 {
+        let res = self.ror(data);
+        self.adc(res);
+        res
     }
-    fn sax(&mut self, _bus: &mut dyn Bus) {
-        todo!()
+    fn sax(&mut self) -> u8 {
+        self.registers.a & self.registers.x
     }
-    fn sbx(&mut self, _bus: &mut dyn Bus) {
-        todo!()
+    fn sbx(&mut self, data: u8) {
+        let res = self.registers.a & self.registers.x;
+        self.registers.x = res.wrapping_sub(data);
+        self.update_zn_flags(self.registers.x);
+        self.registers.p.set(StatusFlags::C, res >= data);
     }
-    fn sha(&mut self, _bus: &mut dyn Bus) {
-        todo!()
+    pub(crate) fn shr(&mut self, base_addr: u16, eff_addr: u16, data: u8) -> (u16, u8) {
+        let adh = ((base_addr >> 8) as u8).wrapping_add(1);
+        let data = data & adh;
+
+        // If we have a page crossing, we should NOT increment the high byte,
+        // and the result of the AND operation should overwrite the high byte
+        // of the effective address
+        let target = if (eff_addr & 0xFF00) != (base_addr & 0xFF00) {
+            ((data as u16) << 8) | (eff_addr & 0xFF)
+        } else {
+            eff_addr
+        };
+        (target, data)
     }
-    fn shx(&mut self, _bus: &mut dyn Bus) {
-        todo!()
+    fn sha(&mut self) -> u8 {
+        self.registers.a & self.registers.x
     }
-    fn shy(&mut self, _bus: &mut dyn Bus) {
-        todo!()
+    fn shx(&mut self) -> u8 {
+        self.registers.x
     }
-    fn slo(&mut self, _bus: &mut dyn Bus) {
-        todo!()
+    fn shy(&mut self) -> u8 {
+        self.registers.y
     }
-    fn sre(&mut self, _bus: &mut dyn Bus) {
-        todo!()
+    fn slo(&mut self, data: u8) -> u8 {
+        let res = self.asl(data);
+        self.ora(res);
+        res
     }
-    fn tas(&mut self, _bus: &mut dyn Bus) {
-        todo!()
+    fn sre(&mut self, data: u8) -> u8 {
+        let res = self.lsr(data);
+        self.eor(res);
+        res
     }
-    fn usb(&mut self, _bus: &mut dyn Bus) {
-        todo!()
+    fn tas(&mut self) -> u8 {
+        self.registers.s = self.registers.a & self.registers.x;
+        self.sha()
+    }
+    fn usb(&mut self, data: u8) {
+        self.sbc(data);
     }
 }

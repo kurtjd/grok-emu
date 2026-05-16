@@ -4,7 +4,6 @@
 A cycle accurate MOS 6502 emulator.
 
 ## TODO
-Illegal opcodes
 Interrupt/NMI handling (repsond to IRQ and NMI signals)
 Respond to RES signal
 Possibly emulate a few more pins
