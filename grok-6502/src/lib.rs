@@ -14,8 +14,8 @@ const INTR_VECTOR: u16 = 0xFFFE;
 
 #[derive(Default)]
 enum State {
-    #[default]
     Reset,
+    #[default]
     Run,
     Halt,
 }
@@ -116,15 +116,18 @@ pub struct Cpu {
 }
 
 impl Cpu {
-    /// Create a new instance of the CPU.
+    /// Create a new instance of the CPU in the `Run` state.
     ///
-    /// *Note:* Begins in reset state and will require 7 cycles (14 ticks) to complete.
+    /// The reset sequence should be performed to initialize CPU.
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Put the CPU into reset state, which will cause it
     /// to begin the 7 cycle (14 tick) reset sequence on next tick.
+    ///
+    /// This is also called automatically if the RES pin on the bus transitions from
+    /// the active state to inactive state.
     pub fn reset(&mut self) {
         self.state = State::Reset;
         self.hcycle = 0;
@@ -134,6 +137,9 @@ impl Cpu {
     }
 
     /// Put the CPU into halt state, which will cause it to do nothing every tick.
+    ///
+    /// The only way to recover from the halt state is to reset the CPU
+    /// (either from a reset signal on the bus or by calling `reset()` directly).
     pub fn halt(&mut self) {
         self.state = State::Halt;
     }
@@ -144,6 +150,14 @@ impl Cpu {
     /// (such as memory placing data on the bus) which the CPU can then react to
     /// in the second clock phase.
     pub fn tick(&mut self, bus: &mut dyn Bus) {
+        // When RST goes active, the CPU enters a halt state
+        // Only when it goes back inactive does the reset sequence actually begin
+        match bus.res_edge() {
+            Some(true) => self.halt(),
+            Some(false) => self.reset(),
+            None => (),
+        }
+
         // Sync should be active for first cycle,
         // but this gets observed AFTER the first cycle completes,
         // hence why we set it inactive (end_instruction sets it active)
@@ -205,7 +219,7 @@ impl Cpu {
                 3.. => self.dispatch(bus),
                 _ => unreachable!(),
             },
-            State::Halt => self.end_instruction(bus),
+            State::Halt => self.hcycle = 0,
         }
     }
 
