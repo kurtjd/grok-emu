@@ -1,12 +1,10 @@
 [workspace]
 resolver = "3"
-members = [
-    "grok-bus",
-    "grok-6502",
-    "grok-80",
-    "grok-dbg",
-    "grok-spinv",
-    "grok-apple2",
-]
+members = ["grok-6502", "grok-apple2"]
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/kurtjd/grok-emu"
 
 [workspace.dependencies]

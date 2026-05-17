@@ -1,5 +1,3 @@
 target/
+**/roms/
 **/single-step-tests/
-.vscode
-notes.txt
-Cargo.lock
