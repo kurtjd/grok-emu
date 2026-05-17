@@ -1,0 +1,18 @@
+{
+    "[markdown]": {
+        "editor.formatOnSave": true
+    },
+    "[toml]": {
+        "editor.formatOnSave": true
+    },
+    "[rust]": {
+        "editor.formatOnSave": true
+    },
+    "rust-analyzer.check.allTargets": false,
+    "rust-analyzer.cargo.features": [],
+    "rust-analyzer.linkedProjects": [
+        "Cargo.toml",
+        "grok-6502/Cargo.toml",
+        "grok-apple2/Cargo.toml",
+    ]
+}

@@ -1,10 +1,9 @@
 [package]
 name = "grok-apple2"
 version = "0.1.0"
-edition = "2024"
-license = "MIT"
-repository = "https://github.com/kurtjd/grok-emu"
-
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 grok-6502 = { path = "../grok-6502" }
