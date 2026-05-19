@@ -1,4 +1,4 @@
-use grok_6502::bus::{self, Bus};
+use grok_6502::bus::{self, Bus, SimpleBus};
 
 const MEM_SIZE: usize = 0x10000;
 const ROM_START: usize = 0xC000;
@@ -8,6 +8,11 @@ const EXT_RAM_START: usize = 0xE000;
 const EXT_RAM_SIZE: usize = 0x2000;
 
 const WRITE_EN_COUNT_MAX: u8 = 1;
+
+pub(crate) mod address {
+    pub const DISK2_START: usize = 0xC600;
+    pub const FW_START: usize = 0xD000;
+}
 
 mod soft_switch {
     pub const BANK2_RAM_READ_NO_WRITE: usize = 0xC080;
@@ -29,50 +34,56 @@ mod soft_switch {
     pub const BANK1_RAM_READ_WRITE_ALT: usize = BANK1_RAM_READ_WRITE + 4;
 }
 
-pub struct MemManager {
-    pub memory: [u8; MEM_SIZE],
+pub(crate) struct Memory {
+    main: [u8; MEM_SIZE],
     bank1_ram: [u8; BANK_RAM_SIZE],
     bank2_ram: [u8; BANK_RAM_SIZE],
     ext_ram: [u8; EXT_RAM_SIZE],
-    bank2_active: bool,
     rom_read: bool,
     ram_write: bool,
+    bank2_active: bool,
     write_en_count: u8,
 }
 
-impl MemManager {
-    pub fn new() -> Self {
-        MemManager {
-            memory: [0; MEM_SIZE],
+impl Default for Memory {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Memory {
+    pub(crate) fn new() -> Self {
+        Memory {
+            main: [0; MEM_SIZE],
             bank1_ram: [0; BANK_RAM_SIZE],
             bank2_ram: [0; BANK_RAM_SIZE],
             ext_ram: [0; EXT_RAM_SIZE],
-            bank2_active: true,
             rom_read: true,
             ram_write: true,
+            bank2_active: true,
             write_en_count: WRITE_EN_COUNT_MAX,
         }
     }
 
-    pub fn tick(&mut self, bus: &mut dyn Bus) {
-        self.handle_soft_sw(bus.addr(), bus.op());
-
-        match bus.op() {
-            bus::Op::Read => bus.set_data(self.mem_read(bus.addr())),
-            bus::Op::Write => self.mem_write(bus.addr(), bus.data()),
-        }
-    }
-
-    pub fn reset(&mut self) {
+    pub(crate) fn reset(&mut self) {
         self.bank2_active = true;
         self.rom_read = true;
         self.ram_write = true;
         self.write_en_count = WRITE_EN_COUNT_MAX;
     }
 
-    fn mem_read(&mut self, address: u16) -> u8 {
+    pub(crate) fn tick(&mut self, bus: &mut SimpleBus) {
+        self.handle_soft_sw(bus.addr(), bus.op());
+
+        match bus.op() {
+            bus::Op::Read => bus.set_data(self.read(bus.addr())),
+            bus::Op::Write => self.write(bus.addr(), bus.data()),
+        }
+    }
+
+    pub(crate) fn read(&mut self, address: u16) -> u8 {
         match (address as usize) < BANK_RAM_START || self.rom_read {
-            true => self.memory[address as usize],
+            true => self.main[address as usize],
 
             false => match (address as usize) < EXT_RAM_START {
                 true => match self.bank2_active {
@@ -85,9 +96,17 @@ impl MemManager {
         }
     }
 
-    fn mem_write(&mut self, address: u16, value: u8) {
+    pub(crate) fn data(&self) -> &[u8] {
+        &self.main
+    }
+
+    pub(crate) fn data_mut(&mut self) -> &mut [u8] {
+        &mut self.main
+    }
+
+    fn write(&mut self, address: u16, value: u8) {
         if address < ROM_START as u16 {
-            self.memory[address as usize] = value
+            self.main[address as usize] = value
         } else if self.ram_write && address >= BANK_RAM_START as u16 {
             if address < EXT_RAM_START as u16 {
                 if self.bank2_active {
@@ -101,7 +120,7 @@ impl MemManager {
         }
     }
 
-    pub fn handle_soft_sw(&mut self, address: u16, op: bus::Op) {
+    fn handle_soft_sw(&mut self, address: u16, op: bus::Op) {
         /* Only respond to read requests. But if we receive a write, reset the write enable count
         because technically it requires two READs to become enabled. */
         if op == bus::Op::Write {

@@ -3,10 +3,7 @@ Wizard of Woz simply parses a raw WOZ2 image and returns a struct containing per
 Reference: https://applesaucefdc.com/woz/reference2
 */
 
-use std::path::Path;
-use std::{fs::File, io::Read};
-
-use crate::dsk2woz;
+use super::dsk2woz;
 
 const WOZ_IMG_SIZE: usize = 250000;
 
@@ -20,13 +17,13 @@ mod section_id {
 }
 
 pub struct WozTrack {
-    pub bit_count: u32,
-    pub data: Vec<u8>,
+    pub(crate) bit_count: u32,
+    pub(crate) data: Vec<u8>,
 }
 
 pub struct WozImage {
-    pub write_protected: bool,
-    pub tracks: Vec<WozTrack>,
+    pub(crate) write_protected: bool,
+    pub(crate) tracks: Vec<WozTrack>,
 }
 
 // Data is stored in image in little-endian format
@@ -106,43 +103,43 @@ impl WozImage {
         }
     }
 
-    pub fn new(file_path: &Path) -> Result<Self, &'static str> {
-        let mut file_buf = [0; WOZ_IMG_SIZE];
-        let ext = file_path.extension().unwrap().to_str().unwrap();
+    pub fn new(data: &[u8]) -> Result<Self, &'static str> {
+        Self::new_inner(data)
+    }
 
-        if ext == "woz" {
-            let mut image = File::open(file_path).expect("Failed to open WOZ image!");
-            let _ = image
-                .read(&mut file_buf)
-                .expect("Failed to read WOZ image data!");
-        } else if ext == "dsk" {
-            dsk2woz::convert(file_path, &mut file_buf, false);
-        } else if ext == "po" {
-            dsk2woz::convert(file_path, &mut file_buf, true);
-        } else {
-            return Err("Unsupported disk image type.");
-        }
+    pub fn new_dsk(data: &[u8]) -> Result<Self, &'static str> {
+        let mut woz_buf = [0; WOZ_IMG_SIZE];
+        dsk2woz::convert(data, &mut woz_buf, false);
+        Self::new_inner(&woz_buf)
+    }
 
-        WozImage::verify(&file_buf)?;
+    pub fn new_po(data: &[u8]) -> Result<Self, &'static str> {
+        let mut woz_buf = [0; WOZ_IMG_SIZE];
+        dsk2woz::convert(data, &mut woz_buf, true);
+        Self::new_inner(&woz_buf)
+    }
+
+    fn new_inner(data: &[u8]) -> Result<Self, &'static str> {
+        WozImage::verify(data)?;
 
         let mut write_protected = false;
         let mut tracks = Vec::new();
         let mut buf_pntr: usize = 12;
 
         loop {
-            let chunk_id = get_bytes_4(&file_buf, buf_pntr);
-            let chunk_size = get_bytes_4(&file_buf, buf_pntr + 4);
+            let chunk_id = get_bytes_4(data, buf_pntr);
+            let chunk_size = get_bytes_4(data, buf_pntr + 4);
             buf_pntr += 8;
 
             match chunk_id {
                 section_id::INFO => {
-                    write_protected = WozImage::parse_info(&file_buf, buf_pntr)?;
+                    write_protected = WozImage::parse_info(data, buf_pntr)?;
                 }
                 section_id::TMAP => {
-                    WozImage::verify_track_map(&file_buf, buf_pntr)?;
+                    WozImage::verify_track_map(data, buf_pntr)?;
                 }
                 section_id::TRKS => {
-                    WozImage::parse_tracks(&file_buf, buf_pntr, &mut tracks);
+                    WozImage::parse_tracks(data, buf_pntr, &mut tracks);
                 }
                 _ => {
                     break; // Unknown chunk, so stop

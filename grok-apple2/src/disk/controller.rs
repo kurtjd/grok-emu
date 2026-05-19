@@ -5,8 +5,8 @@ TODO:
 -Handle proper reset behavior
 */
 
-use crate::wizard_of_woz::WozImage;
-use std::path::Path;
+use super::woz::WozImage;
+use grok_6502::bus::{Bus, SimpleBus};
 
 const MAX_TRACK: u8 = 34;
 const MAX_PHASE: usize = 3;
@@ -32,7 +32,7 @@ mod soft_switch {
     pub const DISK_WRITE: usize = PERIPH_IO_ADDR + 0xF;
 }
 
-pub struct DiskController {
+pub struct Controller {
     slot: usize,
     data_reg: u8,
     half_track: u8,
@@ -48,9 +48,9 @@ pub struct DiskController {
     motor_off_delay: u8,
 }
 
-impl DiskController {
+impl Controller {
     pub fn new(slot: usize) -> Self {
-        DiskController {
+        Controller {
             slot,
             data_reg: 0,
             half_track: 0,
@@ -77,8 +77,8 @@ impl DiskController {
         self.drives_on = false;
     }
 
-    pub fn load_image(&mut self, image_path: &Path) {
-        self.disk_image = Some(WozImage::new(image_path).unwrap());
+    pub fn load_image(&mut self, woz: WozImage) {
+        self.disk_image = Some(woz);
     }
 
     pub fn handle_motor_off_delay(&mut self) {
@@ -93,41 +93,42 @@ impl DiskController {
         }
     }
 
-    pub fn handle_soft_sw(&mut self, address: usize, ram: &mut [u8]) {
+    pub fn tick(&mut self, bus: &mut SimpleBus) {
         if self.disk_image.is_none() {
             return;
         }
 
+        let address = bus.addr() as usize;
         match address - self.slot {
             // Off
             soft_switch::PHASE0_OFF => {
                 self.phase_off(0);
-                self.read_bit(address, ram);
+                self.read_bit(address, bus);
             }
             soft_switch::PHASE1_OFF => {
                 self.phase_off(1);
-                self.read_bit(address, ram);
+                self.read_bit(address, bus);
             }
             soft_switch::PHASE2_OFF => {
                 self.phase_off(2);
-                self.read_bit(address, ram);
+                self.read_bit(address, bus);
             }
             soft_switch::PHASE3_OFF => {
                 self.phase_off(3);
-                self.read_bit(address, ram);
+                self.read_bit(address, bus);
             }
             soft_switch::DRIVES_OFF => {
                 self.motor_off_delay = 60; // 60 frames per second
-                self.read_bit(address, ram);
+                self.read_bit(address, bus);
             }
             soft_switch::SEL_DRIVE1 => {
                 self.current_drive = 1;
-                self.read_bit(address, ram);
+                self.read_bit(address, bus);
             }
             soft_switch::SHIFT_OFF => {
                 self.write_sense = false;
                 if !self.write_mode {
-                    self.read_bit(address, ram);
+                    self.read_bit(address, bus);
                 } else {
                     // TODO: Actually write data to disk image
                     // Copy data reg to disk byte pointer
@@ -137,7 +138,7 @@ impl DiskController {
             }
             soft_switch::DISK_READ => {
                 self.write_mode = false;
-                self.read_bit(address, ram);
+                self.read_bit(address, bus);
             }
 
             // On
@@ -163,7 +164,7 @@ impl DiskController {
             soft_switch::SHIFT_ON => {
                 self.write_sense = true;
                 if self.write_mode {
-                    self.data_reg = ram[address];
+                    self.data_reg = bus.data();
                 } else {
                     self.data_reg = 0; // Apprently reading this addr clears data register
                 }
@@ -258,7 +259,7 @@ impl DiskController {
         self.data_reg |= bit;
     }
 
-    fn read_bit(&mut self, address: usize, ram: &mut [u8]) {
+    fn read_bit(&mut self, address: usize, bus: &mut SimpleBus) {
         if !self.drives_on {
             return;
         }
@@ -276,7 +277,9 @@ impl DiskController {
         }
 
         // Put the contents of the register on the data bus
-        ram[address] = self.data_reg;
+        // Note: This seems wrong. I don't think driving the bus like this is correct.
+        // Will need to dig into a bit more how the disk controller gets data on the bus.
+        bus.start_write(address as u16, self.data_reg);
 
         // If the high bit is set, we've finished reading in a disk byte so clear register
         if self.data_reg & (1 << 7) != 0 {

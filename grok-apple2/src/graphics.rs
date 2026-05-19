@@ -1,15 +1,10 @@
-use sdl2::pixels::PixelFormatEnum;
-use sdl2::render::TextureCreator;
-use sdl2::video::WindowContext;
-use sdl2::{render::Canvas, render::Texture, video::Window};
-
-use std::{fs::File, io::Read};
+use grok_6502::bus::{Bus, SimpleBus};
 
 pub const DISP_WIDTH: u32 = 280;
 pub const DISP_HEIGHT: u32 = 192;
 pub const DISP_SCALE: u32 = 3;
+pub const PIXEL_SIZE: u32 = 3;
 
-const PIXEL_SIZE: u32 = 3;
 const BLOCK_ROWS: usize = 24;
 const BLOCK_COLS: usize = 40;
 const BLOCK_WIDTH: u32 = 7;
@@ -58,30 +53,6 @@ mod color {
     pub const HIRES_ORANGE: u32 = 0xE6792E;
     pub const HIRES_VIOLET: u32 = 0xD660EF;
     pub const HIRES_GREEN: u32 = 0x68E043;
-}
-
-pub struct GraphicsHandler<'a> {
-    canvas: &'a mut Canvas<Window>,
-    pixel_buf: [u8; (DISP_WIDTH * DISP_HEIGHT * PIXEL_SIZE) as usize],
-    pixel_surface: Texture<'a>,
-    char_data: [u8; CHAR_ROM_SIZE],
-    frame_count: u32,
-    flash: bool,
-    txt_mode: bool,
-    hires_mode: bool,
-    mixed_mode: bool,
-    use_pg2: bool,
-}
-
-fn load_char_set() -> [u8; CHAR_ROM_SIZE] {
-    let mut char_rom =
-        File::open("roms/firmware/char_set.rom").expect("Failed to open charset ROM!");
-
-    let mut char_array = [0; CHAR_ROM_SIZE];
-    char_rom
-        .read_exact(&mut char_array)
-        .expect("Failed to read char ROM data!");
-    char_array
 }
 
 fn block_to_pbuf_idx(block_idx: usize) -> usize {
@@ -165,7 +136,47 @@ fn to_pixel_map(buffer: &[u8], buf_idx: usize, block_col: usize) -> [u32; BLOCK_
     pixel_map
 }
 
-impl<'a> GraphicsHandler<'a> {
+pub struct Graphics<V: Video> {
+    video: V,
+    pixel_buf: [u8; (DISP_WIDTH * DISP_HEIGHT * PIXEL_SIZE) as usize],
+    char_data: [u8; CHAR_ROM_SIZE],
+    frame_count: u32,
+    flash: bool,
+    txt_mode: bool,
+    hires_mode: bool,
+    mixed_mode: bool,
+    use_pg2: bool,
+}
+
+impl<V: Video> Graphics<V> {
+    pub fn new(video: V) -> Self {
+        Graphics {
+            video,
+            pixel_buf: [0; (DISP_WIDTH * DISP_HEIGHT * PIXEL_SIZE) as usize],
+            char_data: super::CHAR_ROM
+                .try_into()
+                .expect("Character ROM has incorrect size"),
+            frame_count: 0,
+            flash: false,
+            txt_mode: true,
+            hires_mode: false,
+            mixed_mode: false,
+            use_pg2: false,
+        }
+    }
+
+    pub fn update(&mut self, frame_rate: u32, memory: &[u8]) {
+        self.draw_blocks(memory);
+        self.video.draw_frame(&self.pixel_buf);
+
+        // Keep track when to "flash" text
+        self.handle_flash(frame_rate);
+    }
+
+    pub fn tick(&mut self, bus: &mut SimpleBus) {
+        self.handle_soft_sw(bus);
+    }
+
     fn handle_flash(&mut self, frame_rate: u32) {
         self.frame_count += 1;
         if self.frame_count >= frame_rate / FLASH_RATE {
@@ -301,7 +312,7 @@ impl<'a> GraphicsHandler<'a> {
 
     /* The Apple 2 video memory mapping is crazy (though it makes sense why it is
     the way that it is). So don't blame me for this insanity! */
-    fn draw_blocks(&mut self, buffer: &[u8]) {
+    fn draw_blocks(&mut self, memory: &[u8]) {
         let lores_addrs = match self.use_pg2 {
             true => [0x800, 0x828, 0x850],
             false => [0x400, 0x428, 0x450],
@@ -328,10 +339,10 @@ impl<'a> GraphicsHandler<'a> {
 
                     // If in mixed mode, always draw characters in the last 4 block rows
                     match self.txt_mode || (block_row >= 20 && self.mixed_mode) {
-                        true => self.draw_char_block(buffer[txt_idx], block_idx),
+                        true => self.draw_char_block(memory[txt_idx], block_idx),
                         false => match self.hires_mode {
-                            true => self.draw_hires_block(buffer, idx, block_idx),
-                            false => self.draw_lores_block(buffer[idx], block_idx),
+                            true => self.draw_hires_block(memory, idx, block_idx),
+                            false => self.draw_lores_block(memory[idx], block_idx),
                         },
                     }
 
@@ -341,22 +352,8 @@ impl<'a> GraphicsHandler<'a> {
         }
     }
 
-    pub fn handle_gfx(&mut self, frame_rate: u32, buffer: &[u8]) {
-        self.draw_blocks(buffer);
-
-        // Update canvas
-        self.pixel_surface
-            .update(None, &self.pixel_buf, (DISP_WIDTH * PIXEL_SIZE) as usize)
-            .unwrap();
-        self.canvas.copy(&self.pixel_surface, None, None).unwrap();
-        self.canvas.present();
-
-        // Keep track when to "flash" text
-        self.handle_flash(frame_rate);
-    }
-
-    pub fn handle_soft_sw(&mut self, address: usize) {
-        match address {
+    fn handle_soft_sw(&mut self, bus: &mut SimpleBus) {
+        match bus.addr() as usize {
             soft_switch::GFX_MODE => {
                 self.txt_mode = false;
             }
@@ -383,24 +380,8 @@ impl<'a> GraphicsHandler<'a> {
             _ => {}
         }
     }
+}
 
-    pub fn new(
-        canvas: &'a mut Canvas<Window>,
-        texture_creator: &'a TextureCreator<WindowContext>,
-    ) -> Self {
-        GraphicsHandler {
-            canvas,
-            pixel_buf: [0; (DISP_WIDTH * DISP_HEIGHT * PIXEL_SIZE) as usize],
-            pixel_surface: texture_creator
-                .create_texture_static(PixelFormatEnum::RGB24, DISP_WIDTH, DISP_HEIGHT)
-                .unwrap(),
-            char_data: load_char_set(),
-            frame_count: 0,
-            flash: false,
-            txt_mode: true,
-            hires_mode: false,
-            mixed_mode: false,
-            use_pg2: false,
-        }
-    }
+pub trait Video {
+    fn draw_frame(&mut self, frame_buf: &[u8]);
 }
