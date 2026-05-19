@@ -1,21 +1,115 @@
-mod apple2;
-mod disk_controller;
-mod dsk2woz;
-mod graphics;
-mod mem_manager;
-mod sound;
-mod wizard_of_woz;
+use grok_apple2::{Apple2, graphics, sound};
 
-use apple2::Apple2;
 use sdl2::EventPump;
+use sdl2::audio::{AudioCallback, AudioDevice, AudioSpecDesired};
 use sdl2::event::Event;
 use sdl2::keyboard::{Keycode, Mod};
+use sdl2::pixels::PixelFormatEnum;
+use sdl2::render::{Canvas, Texture};
+use sdl2::video::Window;
+
 use std::time::{Duration, Instant};
 
 const FRAME_RATE: u32 = 60;
 const US_PER_FRAME: u64 = 1000000 / FRAME_RATE as u64;
+const SAMPLE_BUF_SZ: usize = 1024;
+const SAMPLE_VOLUME: f32 = 0.5;
 
-fn handle_input(apple2: &mut Apple2, event_pump: &mut EventPump) -> bool {
+struct SdlVideo {
+    canvas: Canvas<Window>,
+    texture: Texture,
+}
+
+impl graphics::Video for SdlVideo {
+    fn draw_frame(&mut self, frame: &[u8]) {
+        self.texture
+            .update(
+                None,
+                frame,
+                (graphics::DISP_WIDTH * graphics::PIXEL_SIZE) as usize,
+            )
+            .unwrap();
+        self.canvas.copy(&self.texture, None, None).unwrap();
+        self.canvas.present();
+    }
+}
+
+pub struct SquareWave {
+    buffer: [f32; SAMPLE_BUF_SZ],
+    sample_idx: usize,
+    buf_idx: usize,
+}
+
+impl SquareWave {
+    pub fn insert_sample(&mut self, sample: f32) {
+        self.buffer[self.buf_idx] = sample;
+        self.buf_idx += 1;
+        self.buf_idx %= SAMPLE_BUF_SZ;
+    }
+}
+
+struct SdlAudio {
+    device: AudioDevice<SquareWave>,
+}
+
+impl SdlAudio {
+    fn new(sdl_context: &sdl2::Sdl) -> Self {
+        let audio_subsystem = sdl_context.audio().unwrap();
+
+        let audio_spec = AudioSpecDesired {
+            freq: Some(sound::SAMPLE_RATE as i32),
+            channels: Some(1),
+            samples: Some(512),
+        };
+
+        let wave = SquareWave {
+            buffer: [0.0; SAMPLE_BUF_SZ],
+            sample_idx: 0,
+            buf_idx: 0,
+        };
+
+        let device = audio_subsystem
+            .open_playback(None, &audio_spec, |_| wave)
+            .unwrap();
+        device.resume();
+
+        SdlAudio { device }
+    }
+
+    fn insert_samples(&mut self, samples: &[bool]) {
+        let mut lock = self.device.lock();
+        for s in samples {
+            lock.insert_sample(match s {
+                true => SAMPLE_VOLUME,
+                false => -SAMPLE_VOLUME,
+            });
+        }
+    }
+}
+
+impl sound::Audio for SdlAudio {
+    fn feed_samples(&mut self, samples: &[bool]) {
+        self.insert_samples(samples);
+    }
+}
+
+impl AudioCallback for SquareWave {
+    type Channel = f32;
+
+    fn callback(&mut self, out: &mut [f32]) {
+        for x in out.iter_mut() {
+            if self.sample_idx == self.buf_idx {
+                *x = 0.0;
+            } else {
+                *x = self.buffer[self.sample_idx];
+                self.sample_idx += 1;
+                self.sample_idx %= SAMPLE_BUF_SZ;
+            }
+        }
+    }
+}
+
+fn handle_input(apple2: &mut Apple2<SdlVideo, SdlAudio>, event_pump: &mut EventPump) -> bool {
     // TODO: Escape keys, and will need to change key for reset()
 
     for event in event_pump.poll_iter() {
@@ -36,36 +130,14 @@ fn handle_input(apple2: &mut Apple2, event_pump: &mut EventPump) -> bool {
             } => {
                 // Special case for arrow keys because they don't have an ASCII code
                 if keycode == Keycode::Right {
-                    apple2.input_char(apple2::KEY_RIGHT);
-                    continue;
+                    apple2.input_arrow(true);
                 } else if keycode == Keycode::Left {
-                    apple2.input_char(apple2::KEY_LEFT);
-                    continue;
+                    apple2.input_arrow(false);
+                } else {
+                    let shift = keymod.contains(Mod::LSHIFTMOD) || keymod.contains(Mod::RSHIFTMOD);
+                    let ctrl = keymod.contains(Mod::LCTRLMOD) || keymod.contains(Mod::RCTRLMOD);
+                    apple2.input(keycode as u8, shift, ctrl);
                 }
-
-                // Convert lowercase to uppercase
-                let mut ascii = keycode as u8;
-                if ascii.is_ascii_lowercase() {
-                    ascii -= 32;
-                }
-
-                // Get the proper ASCII character if shift held
-                if keymod.contains(Mod::LSHIFTMOD) || keymod.contains(Mod::RSHIFTMOD) {
-                    ascii = Apple2::get_shift_ascii(ascii);
-                }
-
-                // Do nothing if not a valid Apple 2 key
-                if !Apple2::is_valid_key(ascii) {
-                    continue;
-                }
-
-                // Modify the value (if necessary) when CTRL is held
-                if keymod.contains(Mod::LCTRLMOD) || keymod.contains(Mod::RCTRLMOD) {
-                    ascii = Apple2::get_ctrl_ascii(ascii);
-                }
-
-                // The Apple 2 has the high bit set for ASCII characters
-                apple2.input_char(ascii | (1 << 7));
             }
             _ => {}
         }
@@ -82,8 +154,6 @@ fn main() {
     let mut event_pump = sdl_context.event_pump().unwrap();
 
     // Initialize video
-    /* Would be nice to move this all into the graphics module, but that requires making a
-    self-referential data structure which is diffiult in Rust. Will revisit this in the future. */
     let video_subsystem = sdl_context.video().unwrap();
     let window = video_subsystem
         .window(
@@ -95,35 +165,53 @@ fn main() {
         .resizable()
         .build()
         .unwrap();
-    let mut canvas = window.into_canvas().build().unwrap();
-    let texture_creator = canvas.texture_creator();
 
-    // Initialize Apple 2 emulator and insert disks
-    let mut apple2 = Apple2::new(&sdl_context, &mut canvas, &texture_creator);
+    let canvas = window.into_canvas().build().unwrap();
+    let texture_creator = canvas.texture_creator();
+    let texture = texture_creator
+        .create_texture_static(
+            PixelFormatEnum::RGB24,
+            graphics::DISP_WIDTH,
+            graphics::DISP_HEIGHT,
+        )
+        .unwrap();
+    let video = SdlVideo { canvas, texture };
+
+    // Initialize audio
+    let audio = SdlAudio::new(&sdl_context);
+
+    // Initialize Apple 2
+    let mut apple2 = Apple2::new(video, audio);
     apple2.init();
 
+    // Insert disk
     if args.len() > 1 {
         let disk_file = &args[1];
-        apple2.insert_disk(disk_file);
+        let buffer = std::fs::read(disk_file).unwrap();
+        let ext = std::path::Path::new(disk_file)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("");
+        match ext {
+            "woz" => apple2.insert_woz(&buffer),
+            "dsk" => apple2.insert_dsk(&buffer),
+            "po" => apple2.insert_po(&buffer),
+            _ => panic!("Unsupported disk format: .{}", ext),
+        }
     }
 
     // Main loop
-    loop {
-        apple2.draw_frame(FRAME_RATE);
-        if !handle_input(&mut apple2, &mut event_pump) {
-            break;
-        }
-
+    while handle_input(&mut apple2, &mut event_pump) {
         let start_time = Instant::now();
-
         apple2.run_frame(FRAME_RATE);
+        let elapsed = Duration::from_micros(start_time.elapsed().as_micros() as u64);
 
         // Sleep for rest of frame period
-        let elapsed = Duration::from_micros(start_time.elapsed().as_micros() as u64);
         let frame = Duration::from_micros(US_PER_FRAME);
         if frame > elapsed {
-            let duration = frame - elapsed;
-            std::thread::sleep(duration);
+            std::thread::sleep(frame - elapsed);
+        } else {
+            eprintln!("Missed frame!");
         }
     }
 }

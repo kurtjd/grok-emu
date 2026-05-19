@@ -6,11 +6,6 @@ Essentially a rewrite in Rust
 WOZ Reference: https://applesaucefdc.com/woz/reference2/
 */
 
-use std::path::Path;
-use std::{fs::File, io::Read};
-
-const DSK_IMG_SIZE: usize = 143360;
-
 const NUM_TRACKS: u32 = 35;
 const BLOCK_SIZE: u32 = 512;
 const BLOCKS_PER_TRACK: u32 = 13;
@@ -25,6 +20,13 @@ mod section_id {
     pub const INFO: u32 = 0x4F464E49;
     pub const TMAP: u32 = 0x50414D54;
     pub const TRKS: u32 = 0x534B5254;
+}
+
+pub fn convert(data: &[u8], woz: &mut [u8], is_prodos: bool) {
+    fill_header(woz);
+    fill_info(woz);
+    fill_tmap(woz);
+    fill_trks(woz, data, is_prodos);
 }
 
 fn put_u32(value: u32, woz: &mut [u8], start: usize) {
@@ -227,17 +229,4 @@ fn convert_track(woz: &mut [u8], dsk: &[u8], track: u8, is_prodos: bool) {
             write_sync(woz, &mut bit_pntr);
         }
     }
-}
-
-pub fn convert(file_path: &Path, woz: &mut [u8], is_prodos: bool) {
-    let mut file_buf = [0; DSK_IMG_SIZE];
-    let mut image = File::open(file_path).expect("Failed to open DSK image!");
-    image
-        .read_exact(&mut file_buf)
-        .expect("Failed to read DSK image data!");
-
-    fill_header(woz);
-    fill_info(woz);
-    fill_tmap(woz);
-    fill_trks(woz, &file_buf, is_prodos);
 }

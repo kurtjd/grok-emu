@@ -1,93 +1,68 @@
-use sdl2::audio::{AudioCallback, AudioDevice, AudioSpecDesired};
+use grok_6502::bus::{Bus, SimpleBus};
 
-const SAMPLE_BUF_SZ: usize = 1024;
-const SAMPLE_VOLUME: f32 = 0.5;
 pub const SAMPLE_RATE: u32 = 44100;
+
+const CYCLES_PER_SAMPLE: u32 = crate::settings::CPU_CLK_SPEED / SAMPLE_RATE;
 
 mod soft_switch {
     pub const SPEAKER: usize = 0xC030; // Whole page
 }
 
-pub struct SquareWave {
-    buffer: [f32; SAMPLE_BUF_SZ],
-    sample_idx: usize,
-    buf_idx: usize,
+pub(crate) struct Sound<A: Audio> {
+    audio: A,
+    prev_polarity: bool,
+    polarity: bool,
+    polarity_change: bool,
+    cycles: u32,
+    // TODO: Remove std dep
+    samples: Vec<bool>,
 }
 
-impl SquareWave {
-    pub fn insert_sample(&mut self, sample: f32) {
-        self.buffer[self.buf_idx] = sample;
-        self.buf_idx += 1;
-        self.buf_idx %= SAMPLE_BUF_SZ;
+impl<A: Audio> Sound<A> {
+    pub(crate) fn new(audio: A) -> Self {
+        Sound {
+            audio,
+            prev_polarity: false,
+            polarity: false,
+            polarity_change: false,
+            cycles: 0,
+            samples: Vec::new(),
+        }
     }
-}
 
-impl AudioCallback for SquareWave {
-    type Channel = f32;
+    pub(crate) fn reset(&mut self) {
+        self.cycles = 0;
+        self.samples.clear();
+        self.polarity_change = false;
+        self.prev_polarity = self.polarity;
+    }
 
-    fn callback(&mut self, out: &mut [f32]) {
-        for x in out.iter_mut() {
-            if self.sample_idx == self.buf_idx {
-                *x = 0.0;
-            } else {
-                *x = self.buffer[self.sample_idx];
-                self.sample_idx += 1;
-                self.sample_idx %= SAMPLE_BUF_SZ;
+    pub(crate) fn tick(&mut self, bus: &SimpleBus) {
+        self.cycles += 1;
+
+        if self.cycles >= CYCLES_PER_SAMPLE {
+            self.samples.push(self.polarity);
+            self.cycles = 0;
+            if self.polarity != self.prev_polarity {
+                self.polarity_change = true;
             }
         }
-    }
-}
 
-pub struct SoundHandler {
-    pub device: AudioDevice<SquareWave>,
-    pub polarity: bool,
-}
-
-impl SoundHandler {
-    pub fn new(sdl_context: &sdl2::Sdl) -> Self {
-        let audio_subsystem = sdl_context.audio().unwrap();
-
-        let audio_spec = AudioSpecDesired {
-            freq: Some(SAMPLE_RATE as i32),
-            channels: Some(1),
-            samples: Some(512),
-        };
-
-        let wave = SquareWave {
-            buffer: [0.0; SAMPLE_BUF_SZ],
-            sample_idx: 0,
-            buf_idx: 0,
-        };
-
-        let device = audio_subsystem
-            .open_playback(None, &audio_spec, |_| wave)
-            .unwrap();
-
-        SoundHandler {
-            device,
-            polarity: false,
-        }
-    }
-
-    pub fn insert_samples(&mut self, samples: &Vec<bool>) {
-        let mut lock = self.device.lock();
-        for s in samples {
-            lock.insert_sample(match s {
-                true => SAMPLE_VOLUME,
-                false => -SAMPLE_VOLUME,
-            });
-        }
-    }
-
-    pub fn handle_soft_sw(&mut self, address: usize) {
-        /*match address {
-            soft_switch::SPEAKER => {
-                self.polarity = !self.polarity;
-            },
-            _ => {}
-        }*/
-        if address == soft_switch::SPEAKER {
+        if bus.addr() as usize == soft_switch::SPEAKER {
             self.polarity = !self.polarity;
         }
     }
+
+    pub(crate) fn feed_samples(&mut self) {
+        // Note: Only feeding on poalrity change I think is more of an SDL issue and
+        // should likely be removed from here once that is cleaned up
+        if self.polarity_change {
+            self.audio.feed_samples(&self.samples);
+        }
+        self.reset();
+    }
+}
+
+pub trait Audio {
+    fn feed_samples(&mut self, samples: &[bool]);
 }
