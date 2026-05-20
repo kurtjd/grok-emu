@@ -186,7 +186,7 @@ fn reset_cpu(cpu: &mut Cpu, bus: &mut dyn bus::Bus) {
     bus.set_res(false);
 
     // Then wait for reset sequence to complete
-    while !bus.sync() {
+    for _ in 0..14 {
         bus.tick();
         cpu.tick(bus);
     }
@@ -223,14 +223,17 @@ fn opcode_test(path: &PathBuf) {
             cpu.tick(&mut bus);
         }
 
-        // Ensure we are now starting the next opcode (aka we finished this one)
-        assert!(bus.sync());
-
         // Check the final state of the CPU
         test_cpu_state(&cpu, t);
 
         // Check the final state of RAM
         test_ram_state(&memory, t);
+
+        // Ensure we are now starting the next opcode (aka we finished this one)
+        if cpu.state() != State::Halt {
+            cpu.tick(&mut bus);
+            assert!(bus.sync());
+        }
     }
 }
 

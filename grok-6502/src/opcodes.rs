@@ -1390,7 +1390,7 @@ impl Cpu {
                 self.registers.internal.scratch[1] = bus.data();
                 self.registers.pc = u16::from_le_bytes(self.registers.internal.scratch);
                 self.registers.p |= StatusFlags::I;
-                self.end_instruction(bus);
+                self.end_instruction();
             }
 
             _ => unreachable!(),
@@ -1419,7 +1419,7 @@ impl Cpu {
             12 => {
                 self.registers.internal.scratch[1] = bus.data();
                 self.registers.pc = u16::from_le_bytes(self.registers.internal.scratch);
-                self.end_instruction(bus);
+                self.end_instruction();
             }
 
             _ => unreachable!(),
@@ -1451,7 +1451,7 @@ impl Cpu {
             12 => {
                 self.registers.internal.scratch[1] = bus.data();
                 self.registers.pc = u16::from_le_bytes(self.registers.internal.scratch);
-                self.end_instruction(bus);
+                self.end_instruction();
             }
 
             _ => unreachable!(),
@@ -1483,7 +1483,7 @@ impl Cpu {
             12 => {
                 // Increment happens after dummy read
                 self.registers.pc = self.registers.pc.wrapping_add(1);
-                self.end_instruction(bus);
+                self.end_instruction();
             }
 
             _ => unreachable!(),
@@ -1568,7 +1568,7 @@ impl Cpu {
             6 => {
                 self.state = State::Halt;
                 self.registers.pc = self.registers.pc.wrapping_sub(1);
-                self.end_instruction(bus);
+                self.end_instruction();
             }
 
             _ => unreachable!(),
