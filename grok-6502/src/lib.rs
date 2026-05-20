@@ -12,8 +12,8 @@ const STACK_OFFSET: u16 = 0x0100;
 const RESET_VECTOR: u16 = 0xFFFC;
 const INTR_VECTOR: u16 = 0xFFFE;
 
-#[derive(Default)]
-enum State {
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+pub enum State {
     Reset,
     #[default]
     Run,
@@ -116,27 +116,29 @@ pub struct Cpu {
 }
 
 impl Cpu {
-    /// Create a new instance of the CPU in the `Run` state.
+    /// Create a new instance of the CPU in the [`State::Run`] state.
     ///
     /// The reset sequence should be performed to initialize CPU.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// Put the CPU into reset state, which will cause it
+    /// Put the CPU in the [`State::Reset`] state, which will cause it
     /// to begin the 7 cycle (14 tick) reset sequence on next tick.
     ///
     /// This is also called automatically if the RES pin on the bus transitions from
     /// the active state to inactive state.
-    pub fn reset(&mut self) {
+    pub fn reset(&mut self, bus: &mut dyn Bus) {
         self.state = State::Reset;
         self.hcycle = 0;
 
         // Disable interrupts flag and extension bit should be set
         self.registers.p = StatusFlags::E | StatusFlags::I;
+
+        bus.set_sync(false);
     }
 
-    /// Put the CPU into halt state, which will cause it to do nothing every tick.
+    /// Put the CPU in the [`State::Halt`] state, which will cause it to do nothing every tick.
     ///
     /// The only way to recover from the halt state is to reset the CPU
     /// (either from a reset signal on the bus or by calling `reset()` directly).
@@ -154,14 +156,9 @@ impl Cpu {
         // Only when it goes back inactive does the reset sequence actually begin
         match bus.res_edge() {
             Some(true) => self.halt(),
-            Some(false) => self.reset(),
+            Some(false) => self.reset(bus),
             None => (),
         }
-
-        // Sync should be active for first cycle,
-        // but this gets observed AFTER the first cycle completes,
-        // hence why we set it inactive (end_instruction sets it active)
-        bus.set_sync(false);
 
         // An active edge of SO tells us we should set the overflow flag
         if bus.so_edge() == Some(true) {
@@ -174,7 +171,9 @@ impl Cpu {
             return;
         }
 
+        // We start T0 at hcycle 1 (instead of 0) really for ergonomic reasons
         self.hcycle += 1;
+
         match self.state {
             State::Reset => match self.hcycle {
                 // T0 (Dummy fetch)
@@ -206,28 +205,40 @@ impl Cpu {
                     self.registers.internal.scratch[1] = bus.data();
                     self.registers.pc = u16::from_le_bytes(self.registers.internal.scratch);
                     self.state = State::Run;
-                    self.end_instruction(bus);
+                    self.end_instruction();
                 }
 
                 _ => unreachable!(),
             },
-            State::Run => match self.hcycle {
-                // T0 (Fetch opcode)
-                1..=2 => self.fetch(bus),
+            State::Run => {
+                // SYNC should be active for the first cycle (half-cycles 1 and 2)
+                // then go inactive on the next cycle (3rd half-cycle)
+                if self.hcycle == 1 {
+                    bus.set_sync(true);
+                } else if self.hcycle == 3 {
+                    bus.set_sync(false);
+                }
 
-                // T1+
-                3.. => self.dispatch(bus),
-                _ => unreachable!(),
-            },
+                match self.hcycle {
+                    // T0 (Fetch opcode)
+                    1..=2 => self.fetch(bus),
+
+                    // T1+
+                    3.. => self.dispatch(bus),
+                    _ => unreachable!(),
+                }
+            }
             State::Halt => self.hcycle = 0,
         }
     }
 
-    fn end_instruction(&mut self, bus: &mut dyn Bus) {
-        self.hcycle = 0;
+    /// Returns the current [`State`] of the CPU.
+    pub fn state(&self) -> State {
+        self.state
+    }
 
-        // Sync pin goes active when next instruction starts (aka when this one ends)
-        bus.set_sync(true);
+    fn end_instruction(&mut self) {
+        self.hcycle = 0;
     }
 
     fn stack_push(&mut self, bus: &mut dyn Bus, data: u8) {
@@ -262,7 +273,7 @@ impl Cpu {
             4 => match opcode.instr {
                 Instruction::Rmw(exec) => {
                     self.registers.a = exec(self, self.registers.a);
-                    self.end_instruction(bus);
+                    self.end_instruction();
                 }
                 _ => unreachable!(),
             },
@@ -287,7 +298,7 @@ impl Cpu {
                 if let Instruction::Jmp(exec) = opcode.instr {
                     let addr = u16::from_le_bytes(self.registers.internal.scratch);
                     exec(self, addr);
-                    self.end_instruction(bus);
+                    self.end_instruction();
                 }
             }
 
@@ -300,7 +311,7 @@ impl Cpu {
                         7 => bus.start_read(addr),
                         8 => {
                             exec(self, bus.data());
-                            self.end_instruction(bus);
+                            self.end_instruction();
                         }
                         _ => unreachable!(),
                     },
@@ -310,7 +321,7 @@ impl Cpu {
                             let data = exec(self);
                             bus.start_write(addr, data);
                         }
-                        8 => self.end_instruction(bus),
+                        8 => self.end_instruction(),
                         _ => unreachable!(),
                     },
                     Instruction::Rmw(exec) => match self.hcycle {
@@ -327,7 +338,7 @@ impl Cpu {
                             let data = exec(self, self.registers.internal.scratch2[0]);
                             bus.start_write(addr, data);
                         }
-                        12 => self.end_instruction(bus),
+                        12 => self.end_instruction(),
                         _ => unreachable!(),
                     },
                     _ => unreachable!(),
@@ -345,7 +356,7 @@ impl Cpu {
                 3 => bus.start_read(self.registers.pc),
                 4 => {
                     exec(self);
-                    self.end_instruction(bus);
+                    self.end_instruction();
                 }
                 _ => unreachable!(),
             },
@@ -359,7 +370,7 @@ impl Cpu {
                     let data = exec(self);
                     self.stack_push(bus, data);
                 }
-                6 => self.end_instruction(bus),
+                6 => self.end_instruction(),
                 _ => unreachable!(),
             },
             Instruction::Pull(exec) => match self.hcycle {
@@ -375,7 +386,7 @@ impl Cpu {
                 7 => self.stack_pop(bus),
                 8 => {
                     exec(self, bus.data());
-                    self.end_instruction(bus);
+                    self.end_instruction();
                 }
                 _ => unreachable!(),
             },
@@ -392,7 +403,7 @@ impl Cpu {
             4 => match opcode.instr {
                 Instruction::Read(exec) => {
                     exec(self, bus.data());
-                    self.end_instruction(bus);
+                    self.end_instruction();
                 }
                 _ => unreachable!(),
             },
@@ -429,7 +440,7 @@ impl Cpu {
                     // No page was crossed, so end here
                     if (eff_addr & 0xFF00) == (addr & 0xFF00) {
                         exec(self, bus.data());
-                        self.end_instruction(bus);
+                        self.end_instruction();
                     }
                 }
             }
@@ -444,7 +455,7 @@ impl Cpu {
                         9 => bus.start_read(eff_addr),
                         10 => {
                             exec(self, bus.data());
-                            self.end_instruction(bus);
+                            self.end_instruction();
                         }
                         _ => unreachable!(),
                     },
@@ -454,7 +465,7 @@ impl Cpu {
                             let data = exec(self);
                             bus.start_write(eff_addr, data);
                         }
-                        10 => self.end_instruction(bus),
+                        10 => self.end_instruction(),
                         _ => unreachable!(),
                     },
                     Instruction::Shr(exec) => match self.hcycle {
@@ -464,7 +475,7 @@ impl Cpu {
                             let (target, data) = self.shr(base_addr, eff_addr, data);
                             bus.start_write(target, data);
                         }
-                        10 => self.end_instruction(bus),
+                        10 => self.end_instruction(),
                         _ => unreachable!(),
                     },
                     Instruction::Rmw(exec) => match self.hcycle {
@@ -481,7 +492,7 @@ impl Cpu {
                             let data = exec(self, self.registers.internal.scratch2[0]);
                             bus.start_write(eff_addr, data);
                         }
-                        14 => self.end_instruction(bus),
+                        14 => self.end_instruction(),
                         _ => unreachable!(),
                     },
                     _ => unreachable!(),
@@ -524,12 +535,12 @@ impl Cpu {
                     Instruction::Jmp(exec) => {
                         let addr = u16::from_le_bytes(self.registers.internal.scratch2);
                         exec(self, addr);
-                        self.end_instruction(bus);
+                        self.end_instruction();
                     }
                     Instruction::Misc(exec) => {
                         // Instruction will know address is in scratch2
                         exec(self, bus);
-                        self.end_instruction(bus);
+                        self.end_instruction();
                     }
                     _ => unreachable!(),
                 }
@@ -574,7 +585,7 @@ impl Cpu {
                         11 => bus.start_read(eff_addr),
                         12 => {
                             exec(self, bus.data());
-                            self.end_instruction(bus);
+                            self.end_instruction();
                         }
                         _ => unreachable!(),
                     },
@@ -584,7 +595,7 @@ impl Cpu {
                             let data = exec(self);
                             bus.start_write(eff_addr, data);
                         }
-                        12 => self.end_instruction(bus),
+                        12 => self.end_instruction(),
                         _ => unreachable!(),
                     },
                     // Note: This is only used by illegal opcodes
@@ -602,7 +613,7 @@ impl Cpu {
                             let data = exec(self, self.registers.internal.scratch2[0]);
                             bus.start_write(eff_addr, data);
                         }
-                        16 => self.end_instruction(bus),
+                        16 => self.end_instruction(),
                         _ => unreachable!(),
                     },
                     _ => unreachable!(),
@@ -649,7 +660,7 @@ impl Cpu {
                     // No page was crossed, so end here
                     if (eff_addr & 0xFF00) == (addr & 0xFF00) {
                         exec(self, bus.data());
-                        self.end_instruction(bus);
+                        self.end_instruction();
                     }
                 }
             }
@@ -664,7 +675,7 @@ impl Cpu {
                         11 => bus.start_read(eff_addr),
                         12 => {
                             exec(self, bus.data());
-                            self.end_instruction(bus);
+                            self.end_instruction();
                         }
                         _ => unreachable!(),
                     },
@@ -674,7 +685,7 @@ impl Cpu {
                             let data = exec(self);
                             bus.start_write(eff_addr, data);
                         }
-                        12 => self.end_instruction(bus),
+                        12 => self.end_instruction(),
                         _ => unreachable!(),
                     },
                     Instruction::Shr(exec) => match self.hcycle {
@@ -684,7 +695,7 @@ impl Cpu {
                             let (target, data) = self.shr(addr, eff_addr, data);
                             bus.start_write(target, data);
                         }
-                        12 => self.end_instruction(bus),
+                        12 => self.end_instruction(),
                         _ => unreachable!(),
                     },
                     // Note: This is only used by illegal opcodes
@@ -702,7 +713,7 @@ impl Cpu {
                             let data = exec(self, self.registers.internal.scratch2[0]);
                             bus.start_write(eff_addr, data);
                         }
-                        16 => self.end_instruction(bus),
+                        16 => self.end_instruction(),
                         _ => unreachable!(),
                     },
                     _ => unreachable!(),
@@ -725,7 +736,7 @@ impl Cpu {
                     Instruction::Branch(exec) => {
                         // If the branch isn't taken, we end early
                         if !exec(self) {
-                            self.end_instruction(bus);
+                            self.end_instruction();
                         }
                     }
 
@@ -747,7 +758,7 @@ impl Cpu {
                 // If no page was crossed, we can end early and branch
                 if (eff_addr & 0xFF00) == (self.registers.pc & 0xFF00) {
                     self.registers.pc = eff_addr;
-                    self.end_instruction(bus);
+                    self.end_instruction();
                 }
             }
 
@@ -763,7 +774,7 @@ impl Cpu {
             8 => {
                 // But actually jump to the fixed effective address
                 self.registers.pc = u16::from_le_bytes(self.registers.internal.scratch);
-                self.end_instruction(bus);
+                self.end_instruction();
             }
 
             _ => unreachable!(),
@@ -787,7 +798,7 @@ impl Cpu {
                         5 => bus.start_read(addr),
                         6 => {
                             exec(self, bus.data());
-                            self.end_instruction(bus);
+                            self.end_instruction();
                         }
                         _ => unreachable!(),
                     },
@@ -797,7 +808,7 @@ impl Cpu {
                             let data = exec(self);
                             bus.start_write(addr, data);
                         }
-                        6 => self.end_instruction(bus),
+                        6 => self.end_instruction(),
                         _ => unreachable!(),
                     },
                     Instruction::Rmw(exec) => match self.hcycle {
@@ -814,7 +825,7 @@ impl Cpu {
                             let data = exec(self, self.registers.internal.scratch[1]);
                             bus.start_write(addr, data);
                         }
-                        10 => self.end_instruction(bus),
+                        10 => self.end_instruction(),
                         _ => unreachable!(),
                     },
                     _ => unreachable!(),
@@ -845,7 +856,7 @@ impl Cpu {
                         7 => bus.start_read(eff_addr),
                         8 => {
                             exec(self, bus.data());
-                            self.end_instruction(bus);
+                            self.end_instruction();
                         }
                         _ => unreachable!(),
                     },
@@ -855,7 +866,7 @@ impl Cpu {
                             let data = exec(self);
                             bus.start_write(eff_addr, data);
                         }
-                        8 => self.end_instruction(bus),
+                        8 => self.end_instruction(),
                         _ => unreachable!(),
                     },
                     Instruction::Rmw(exec) => match self.hcycle {
@@ -872,7 +883,7 @@ impl Cpu {
                             let data = exec(self, self.registers.internal.scratch[1]);
                             bus.start_write(eff_addr, data);
                         }
-                        12 => self.end_instruction(bus),
+                        12 => self.end_instruction(),
                         _ => unreachable!(),
                     },
                     _ => unreachable!(),

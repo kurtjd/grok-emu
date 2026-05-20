@@ -54,13 +54,13 @@ impl<V: Video, A: Audio> Apple2<V, A> {
     pub fn reset(&mut self) {
         self.memory.reset();
         self.disk.reset();
-        self.cpu.reset();
+        self.cpu.reset(&mut self.bus);
     }
 
     pub fn init(&mut self) {
         self.load_fw_rom();
         self.load_disk_rom();
-        self.cpu.reset();
+        self.reset();
     }
 
     pub fn input(&mut self, char: u8, shift: bool, ctrl: bool) {
