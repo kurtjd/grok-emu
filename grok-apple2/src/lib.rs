@@ -8,6 +8,7 @@ use disk::controller::Controller;
 use graphics::{Graphics, Video};
 use grok_6502::Cpu;
 use grok_6502::bus::{Bus, SimpleBus};
+use input::Input;
 use memory::Memory;
 use sound::{Audio, Sound};
 
@@ -28,6 +29,7 @@ pub struct Apple2<V: Video, A: Audio> {
     memory: Memory,
     graphics: Graphics<V>,
     sound: Sound<A>,
+    input: Input,
     disk: Controller,
     cpu: Cpu,
 }
@@ -39,6 +41,7 @@ impl<V: Video, A: Audio> Apple2<V, A> {
         let cpu = Cpu::new();
         let graphics = Graphics::new(video);
         let sound = Sound::new(audio);
+        let input = Input::new();
         let disk = Controller::new(settings::DISK_SLOT);
 
         Apple2 {
@@ -46,6 +49,7 @@ impl<V: Video, A: Audio> Apple2<V, A> {
             memory,
             graphics,
             sound,
+            input,
             disk,
             cpu,
         }
@@ -63,41 +67,6 @@ impl<V: Video, A: Audio> Apple2<V, A> {
         self.reset();
     }
 
-    pub fn input(&mut self, char: u8, shift: bool, ctrl: bool) {
-        // Convert lowercase to uppercase
-        let mut ascii = char;
-        if ascii.is_ascii_lowercase() {
-            ascii -= 32;
-        }
-
-        // Get the proper ASCII character if shift held
-        if shift {
-            ascii = input::get_shift_ascii(ascii);
-        }
-
-        // Do nothing if not a valid Apple 2 key
-        if !input::is_valid_key(ascii) {
-            return;
-        }
-
-        // Modify the value (if necessary) when CTRL is held
-        if ctrl {
-            ascii = input::get_ctrl_ascii(ascii);
-        }
-
-        // The Apple 2 has the high bit set for ASCII characters
-        self.memory.data_mut()[input::DATA_ADDR] = ascii | (1 << 7);
-    }
-
-    pub fn input_arrow(&mut self, right: bool) {
-        let ascii = if right {
-            input::KEY_RIGHT
-        } else {
-            input::KEY_LEFT
-        };
-        self.memory.data_mut()[input::DATA_ADDR] = ascii;
-    }
-
     pub fn run_frame(&mut self, frame_rate: u32) {
         let cycles_per_frame = settings::CPU_CLK_SPEED / frame_rate;
 
@@ -112,13 +81,21 @@ impl<V: Video, A: Audio> Apple2<V, A> {
             self.graphics.tick(&mut self.bus);
             self.sound.tick(&self.bus);
             self.disk.tick(&mut self.bus);
-            input::tick(&mut self.bus, self.memory.data_mut());
+            self.input.tick(&mut self.bus);
             self.bus.tick();
             self.cpu.tick(&mut self.bus);
         }
 
         self.sound.feed_samples();
         self.disk.handle_motor_off_delay();
+    }
+
+    pub fn input(&mut self, char: u8, shift: bool, ctrl: bool) {
+        self.input.set(char, shift, ctrl);
+    }
+
+    pub fn input_arrow(&mut self, right: bool) {
+        self.input.set_arrow(right);
     }
 
     pub fn insert_woz(&mut self, data: &[u8]) {

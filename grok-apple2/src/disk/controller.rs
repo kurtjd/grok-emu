@@ -103,32 +103,32 @@ impl Controller {
             // Off
             soft_switch::PHASE0_OFF => {
                 self.phase_off(0);
-                self.read_bit(address, bus);
+                self.read_bit(bus);
             }
             soft_switch::PHASE1_OFF => {
                 self.phase_off(1);
-                self.read_bit(address, bus);
+                self.read_bit(bus);
             }
             soft_switch::PHASE2_OFF => {
                 self.phase_off(2);
-                self.read_bit(address, bus);
+                self.read_bit(bus);
             }
             soft_switch::PHASE3_OFF => {
                 self.phase_off(3);
-                self.read_bit(address, bus);
+                self.read_bit(bus);
             }
             soft_switch::DRIVES_OFF => {
                 self.motor_off_delay = 60; // 60 frames per second
-                self.read_bit(address, bus);
+                self.read_bit(bus);
             }
             soft_switch::SEL_DRIVE1 => {
                 self.current_drive = 1;
-                self.read_bit(address, bus);
+                self.read_bit(bus);
             }
             soft_switch::SHIFT_OFF => {
                 self.write_sense = false;
                 if !self.write_mode {
-                    self.read_bit(address, bus);
+                    self.read_bit(bus);
                 } else {
                     // TODO: Actually write data to disk image
                     // Copy data reg to disk byte pointer
@@ -138,7 +138,7 @@ impl Controller {
             }
             soft_switch::DISK_READ => {
                 self.write_mode = false;
-                self.read_bit(address, bus);
+                self.read_bit(bus);
             }
 
             // On
@@ -259,7 +259,7 @@ impl Controller {
         self.data_reg |= bit;
     }
 
-    fn read_bit(&mut self, address: usize, bus: &mut SimpleBus) {
+    fn read_bit(&mut self, bus: &mut SimpleBus) {
         if !self.drives_on {
             return;
         }
@@ -277,9 +277,7 @@ impl Controller {
         }
 
         // Put the contents of the register on the data bus
-        // Note: This seems wrong. I don't think driving the bus like this is correct.
-        // Will need to dig into a bit more how the disk controller gets data on the bus.
-        bus.start_write(address as u16, self.data_reg);
+        bus.set_data(self.data_reg);
 
         // If the high bit is set, we've finished reading in a disk byte so clear register
         if self.data_reg & (1 << 7) != 0 {

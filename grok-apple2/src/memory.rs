@@ -9,6 +9,9 @@ const EXT_RAM_SIZE: usize = 0x2000;
 
 const WRITE_EN_COUNT_MAX: u8 = 1;
 
+const MMIO_START: u16 = 0xC000;
+const MMIO_END: u16 = 0xC0FF;
+
 pub(crate) mod address {
     pub const DISK2_START: usize = 0xC600;
     pub const FW_START: usize = 0xD000;
@@ -73,8 +76,11 @@ impl Memory {
     }
 
     pub(crate) fn tick(&mut self, bus: &mut SimpleBus) {
-        self.handle_soft_sw(bus.addr(), bus.op());
+        if (MMIO_START..=MMIO_END).contains(&bus.addr()) {
+            return;
+        }
 
+        self.handle_soft_sw(bus.addr(), bus.op());
         match bus.op() {
             bus::Op::Read => bus.set_data(self.read(bus.addr())),
             bus::Op::Write => self.write(bus.addr(), bus.data()),
