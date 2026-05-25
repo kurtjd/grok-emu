@@ -1,17 +1,14 @@
-use grok_6502::bus::{Bus, SimpleBus};
-
-pub const DISP_WIDTH: u32 = 280;
-pub const DISP_HEIGHT: u32 = 192;
-pub const DISP_SCALE: u32 = 3;
-pub const PIXEL_SIZE: u32 = 3;
+use super::Video;
+use crate::settings;
+use grok_6502::bus::Bus;
 
 const BLOCK_ROWS: usize = 24;
 const BLOCK_COLS: usize = 40;
 const BLOCK_WIDTH: u32 = 7;
 const BLOCK_HEIGHT: u32 = 8;
-const CHAR_ROM_SIZE: usize = 0x800;
 const FLASH_RATE: u32 = 4;
-const BYTES_PER_BLOCK_ROW: usize = BLOCK_COLS * (BLOCK_WIDTH * PIXEL_SIZE) as usize;
+const BYTES_PER_BLOCK_ROW: usize = BLOCK_COLS * (BLOCK_WIDTH * settings::PIXEL_SIZE) as usize;
+pub(crate) const CHAR_ROM_SIZE: usize = 0x800;
 
 mod soft_switch {
     pub const GFX_MODE: usize = 0xC050;
@@ -59,7 +56,8 @@ fn block_to_pbuf_idx(block_idx: usize) -> usize {
     let row = (block_idx / BLOCK_COLS) as u32;
     let col = (block_idx % BLOCK_COLS) as u32;
 
-    (row * (BLOCK_HEIGHT * BYTES_PER_BLOCK_ROW as u32) + col * (BLOCK_WIDTH * PIXEL_SIZE)) as usize
+    (row * (BLOCK_HEIGHT * BYTES_PER_BLOCK_ROW as u32) + col * (BLOCK_WIDTH * settings::PIXEL_SIZE))
+        as usize
 }
 
 fn to_pixel_map(buffer: &[u8], buf_idx: usize, block_col: usize) -> [u32; BLOCK_WIDTH as usize] {
@@ -138,7 +136,7 @@ fn to_pixel_map(buffer: &[u8], buf_idx: usize, block_col: usize) -> [u32; BLOCK_
 
 pub struct Graphics<V: Video> {
     video: V,
-    pixel_buf: [u8; (DISP_WIDTH * DISP_HEIGHT * PIXEL_SIZE) as usize],
+    pixel_buf: [u8; (settings::DISP_WIDTH * settings::DISP_HEIGHT * settings::PIXEL_SIZE) as usize],
     char_data: [u8; CHAR_ROM_SIZE],
     frame_count: u32,
     flash: bool,
@@ -149,13 +147,12 @@ pub struct Graphics<V: Video> {
 }
 
 impl<V: Video> Graphics<V> {
-    pub fn new(video: V) -> Self {
+    pub fn new(char_rom: [u8; CHAR_ROM_SIZE], video: V) -> Self {
         Graphics {
             video,
-            pixel_buf: [0; (DISP_WIDTH * DISP_HEIGHT * PIXEL_SIZE) as usize],
-            char_data: super::CHAR_ROM
-                .try_into()
-                .expect("Character ROM has incorrect size"),
+            pixel_buf: [0; (settings::DISP_WIDTH * settings::DISP_HEIGHT * settings::PIXEL_SIZE)
+                as usize],
+            char_data: char_rom,
             frame_count: 0,
             flash: false,
             txt_mode: true,
@@ -165,7 +162,7 @@ impl<V: Video> Graphics<V> {
         }
     }
 
-    pub fn update(&mut self, frame_rate: u32, memory: &[u8]) {
+    pub fn draw(&mut self, frame_rate: u32, memory: &[u8]) {
         self.draw_blocks(memory);
         self.video.draw_frame(&self.pixel_buf);
 
@@ -173,7 +170,7 @@ impl<V: Video> Graphics<V> {
         self.handle_flash(frame_rate);
     }
 
-    pub fn tick(&mut self, bus: &mut SimpleBus) {
+    pub fn decode(&mut self, bus: &dyn Bus) {
         self.handle_soft_sw(bus);
     }
 
@@ -186,7 +183,7 @@ impl<V: Video> Graphics<V> {
     }
 
     fn draw_pixel(&mut self, color: u32, idx: usize) {
-        for i in 0..PIXEL_SIZE as usize {
+        for i in 0..settings::PIXEL_SIZE as usize {
             self.pixel_buf[idx + i] = ((color >> (16 - (8 * i))) & 0xFF) as u8;
         }
     }
@@ -243,7 +240,7 @@ impl<V: Video> Graphics<V> {
                     char_map <<= 1;
                 }
 
-                idx += PIXEL_SIZE as usize;
+                idx += settings::PIXEL_SIZE as usize;
             }
 
             pbuf_idx += BYTES_PER_BLOCK_ROW;
@@ -286,7 +283,7 @@ impl<V: Video> Graphics<V> {
                 };
 
                 self.draw_pixel(color, idx);
-                idx += PIXEL_SIZE as usize;
+                idx += settings::PIXEL_SIZE as usize;
             }
 
             pbuf_idx += BYTES_PER_BLOCK_ROW;
@@ -303,7 +300,7 @@ impl<V: Video> Graphics<V> {
 
             for i in 0..BLOCK_WIDTH {
                 self.draw_pixel(pixel_map[i as usize], idx);
-                idx += PIXEL_SIZE as usize;
+                idx += settings::PIXEL_SIZE as usize;
             }
 
             pbuf_idx += BYTES_PER_BLOCK_ROW;
@@ -352,7 +349,7 @@ impl<V: Video> Graphics<V> {
         }
     }
 
-    fn handle_soft_sw(&mut self, bus: &mut SimpleBus) {
+    fn handle_soft_sw(&mut self, bus: &dyn Bus) {
         match bus.addr() as usize {
             soft_switch::GFX_MODE => {
                 self.txt_mode = false;
@@ -380,8 +377,4 @@ impl<V: Video> Graphics<V> {
             _ => {}
         }
     }
-}
-
-pub trait Video {
-    fn draw_frame(&mut self, frame_buf: &[u8]);
 }

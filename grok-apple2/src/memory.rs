@@ -1,187 +1,71 @@
-use grok_6502::bus::{self, Bus, SimpleBus};
+use core::ops::{Index, IndexMut};
+use core::slice::SliceIndex;
+use grok_6502::bus::{self, Bus};
 
-const MEM_SIZE: usize = 0x10000;
-const ROM_START: usize = 0xC000;
-const BANK_RAM_START: usize = 0xD000;
-const BANK_RAM_SIZE: usize = 0x1000;
-const EXT_RAM_START: usize = 0xE000;
-const EXT_RAM_SIZE: usize = 0x2000;
+const RAM_SIZE: usize = 48 * 1024;
+pub(crate) const ROM_SIZE: usize = 12 * 1024;
 
-const WRITE_EN_COUNT_MAX: u8 = 1;
-
-const MMIO_START: u16 = 0xC000;
-const MMIO_END: u16 = 0xC0FF;
-
-pub(crate) mod address {
-    pub const DISK2_START: usize = 0xC600;
-    pub const FW_START: usize = 0xD000;
+pub(crate) struct Ram {
+    data: [u8; RAM_SIZE],
 }
 
-mod soft_switch {
-    pub const BANK2_RAM_READ_NO_WRITE: usize = 0xC080;
-    pub const BANK2_ROM_READ_WRITE: usize = 0xC081;
-    pub const BANK2_ROM_READ_NO_WRITE: usize = 0xC082;
-    pub const BANK2_RAM_READ_WRITE: usize = 0xC083;
-    pub const BANK1_RAM_READ_NO_WRITE: usize = 0xC088;
-    pub const BANK1_ROM_READ_WRITE: usize = 0xC089;
-    pub const BANK1_ROM_READ_NO_WRITE: usize = 0xC08A;
-    pub const BANK1_RAM_READ_WRITE: usize = 0xC08B;
-
-    pub const BANK2_RAM_READ_NO_WRITE_ALT: usize = BANK2_RAM_READ_NO_WRITE + 4;
-    pub const BANK2_ROM_READ_WRITE_ALT: usize = BANK2_ROM_READ_WRITE + 4;
-    pub const BANK2_ROM_READ_NO_WRITE_ALT: usize = BANK2_ROM_READ_NO_WRITE + 4;
-    pub const BANK2_RAM_READ_WRITE_ALT: usize = BANK2_RAM_READ_WRITE + 4;
-    pub const BANK1_RAM_READ_NO_WRITE_ALT: usize = BANK1_RAM_READ_NO_WRITE + 4;
-    pub const BANK1_ROM_READ_WRITE_ALT: usize = BANK1_ROM_READ_WRITE + 4;
-    pub const BANK1_ROM_READ_NO_WRITE_ALT: usize = BANK1_ROM_READ_NO_WRITE + 4;
-    pub const BANK1_RAM_READ_WRITE_ALT: usize = BANK1_RAM_READ_WRITE + 4;
-}
-
-pub(crate) struct Memory {
-    main: [u8; MEM_SIZE],
-    bank1_ram: [u8; BANK_RAM_SIZE],
-    bank2_ram: [u8; BANK_RAM_SIZE],
-    ext_ram: [u8; EXT_RAM_SIZE],
-    rom_read: bool,
-    ram_write: bool,
-    bank2_active: bool,
-    write_en_count: u8,
-}
-
-impl Default for Memory {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Memory {
+impl Ram {
     pub(crate) fn new() -> Self {
-        Memory {
-            main: [0; MEM_SIZE],
-            bank1_ram: [0; BANK_RAM_SIZE],
-            bank2_ram: [0; BANK_RAM_SIZE],
-            ext_ram: [0; EXT_RAM_SIZE],
-            rom_read: true,
-            ram_write: true,
-            bank2_active: true,
-            write_en_count: WRITE_EN_COUNT_MAX,
+        Ram {
+            data: [0; RAM_SIZE],
         }
     }
 
-    pub(crate) fn reset(&mut self) {
-        self.bank2_active = true;
-        self.rom_read = true;
-        self.ram_write = true;
-        self.write_en_count = WRITE_EN_COUNT_MAX;
-    }
-
-    pub(crate) fn tick(&mut self, bus: &mut SimpleBus) {
-        if (MMIO_START..=MMIO_END).contains(&bus.addr()) {
-            return;
-        }
-
-        self.handle_soft_sw(bus.addr(), bus.op());
+    pub(crate) fn decode(&mut self, bus: &mut dyn Bus) {
         match bus.op() {
-            bus::Op::Read => bus.set_data(self.read(bus.addr())),
-            bus::Op::Write => self.write(bus.addr(), bus.data()),
+            bus::Op::Read => bus.set_data(self[bus.addr() as usize]),
+            bus::Op::Write => self[bus.addr() as usize] = bus.data(),
         }
     }
+}
 
-    pub(crate) fn read(&mut self, address: u16) -> u8 {
-        match (address as usize) < BANK_RAM_START || self.rom_read {
-            true => self.main[address as usize],
+impl<I: SliceIndex<[u8]>> Index<I> for Ram {
+    type Output = I::Output;
 
-            false => match (address as usize) < EXT_RAM_START {
-                true => match self.bank2_active {
-                    true => self.bank2_ram[address as usize - BANK_RAM_START],
-                    false => self.bank1_ram[address as usize - BANK_RAM_START],
-                },
+    fn index(&self, index: I) -> &Self::Output {
+        &self.data[index]
+    }
+}
 
-                false => self.ext_ram[address as usize - EXT_RAM_START],
-            },
+impl<I: SliceIndex<[u8]>> IndexMut<I> for Ram {
+    fn index_mut(&mut self, index: I) -> &mut Self::Output {
+        &mut self.data[index]
+    }
+}
+
+pub(crate) struct Rom {
+    data: [u8; ROM_SIZE],
+}
+
+impl Rom {
+    pub(crate) fn new(data: [u8; ROM_SIZE]) -> Self {
+        Rom { data }
+    }
+
+    pub(crate) fn decode(&mut self, bus: &mut dyn Bus, periph_pins: &mut crate::peripheral::Pins) {
+        // Don't want ROM driving the bus if a peripheral has set the INH pin active this cycle
+        if !periph_pins.inh() {
+            let rom_addr = bus.addr() - crate::mem_map::ROM;
+            bus.set_data(self[rom_addr as usize]);
         }
     }
+}
 
-    pub(crate) fn data(&self) -> &[u8] {
-        &self.main
+impl<I: SliceIndex<[u8]>> Index<I> for Rom {
+    type Output = I::Output;
+
+    fn index(&self, index: I) -> &Self::Output {
+        &self.data[index]
     }
+}
 
-    pub(crate) fn data_mut(&mut self) -> &mut [u8] {
-        &mut self.main
-    }
-
-    fn write(&mut self, address: u16, value: u8) {
-        if address < ROM_START as u16 {
-            self.main[address as usize] = value
-        } else if self.ram_write && address >= BANK_RAM_START as u16 {
-            if address < EXT_RAM_START as u16 {
-                if self.bank2_active {
-                    self.bank2_ram[address as usize - BANK_RAM_START] = value;
-                } else {
-                    self.bank1_ram[address as usize - BANK_RAM_START] = value;
-                }
-            } else {
-                self.ext_ram[address as usize - EXT_RAM_START] = value;
-            }
-        }
-    }
-
-    fn handle_soft_sw(&mut self, address: u16, op: bus::Op) {
-        /* Only respond to read requests. But if we receive a write, reset the write enable count
-        because technically it requires two READs to become enabled. */
-        if op == bus::Op::Write {
-            self.write_en_count = WRITE_EN_COUNT_MAX;
-            return;
-        }
-
-        match address as usize {
-            soft_switch::BANK2_RAM_READ_NO_WRITE | soft_switch::BANK2_RAM_READ_NO_WRITE_ALT => {
-                self.read_enable(true, false);
-            }
-            soft_switch::BANK2_ROM_READ_WRITE | soft_switch::BANK2_ROM_READ_WRITE_ALT => {
-                self.write_enable(true, true);
-            }
-            soft_switch::BANK2_ROM_READ_NO_WRITE | soft_switch::BANK2_ROM_READ_NO_WRITE_ALT => {
-                self.read_enable(true, true);
-            }
-            soft_switch::BANK2_RAM_READ_WRITE | soft_switch::BANK2_RAM_READ_WRITE_ALT => {
-                self.write_enable(true, false);
-            }
-            soft_switch::BANK1_RAM_READ_NO_WRITE | soft_switch::BANK1_RAM_READ_NO_WRITE_ALT => {
-                self.read_enable(false, false);
-            }
-            soft_switch::BANK1_ROM_READ_WRITE | soft_switch::BANK1_ROM_READ_WRITE_ALT => {
-                self.write_enable(false, true);
-            }
-            soft_switch::BANK1_ROM_READ_NO_WRITE | soft_switch::BANK1_ROM_READ_NO_WRITE_ALT => {
-                self.read_enable(false, true);
-            }
-            soft_switch::BANK1_RAM_READ_WRITE | soft_switch::BANK1_RAM_READ_WRITE_ALT => {
-                self.write_enable(false, false);
-            }
-            _ => {}
-        }
-    }
-
-    fn read_enable(&mut self, bank2: bool, rom_read: bool) {
-        self.bank2_active = bank2;
-        self.rom_read = rom_read;
-        self.ram_write = false;
-        self.write_en_count = WRITE_EN_COUNT_MAX;
-    }
-
-    fn write_enable(&mut self, bank2: bool, rom_read: bool) {
-        self.bank2_active = bank2;
-        self.rom_read = rom_read;
-
-        // It takes two consecutive accesses to a write enable switch to actually enable RAM write
-        if !self.ram_write {
-            if self.write_en_count == 0 {
-                self.ram_write = true;
-                self.write_en_count = WRITE_EN_COUNT_MAX;
-            } else {
-                self.write_en_count -= 1;
-            }
-        }
+impl<I: SliceIndex<[u8]>> IndexMut<I> for Rom {
+    fn index_mut(&mut self, index: I) -> &mut Self::Output {
+        &mut self.data[index]
     }
 }

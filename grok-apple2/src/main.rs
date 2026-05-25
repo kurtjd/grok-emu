@@ -1,5 +1,5 @@
-use grok_apple2::{Apple2, graphics, sound};
-
+use grok_apple2::peripheral::{disk, language};
+use grok_apple2::{Apple2, settings};
 use sdl2::EventPump;
 use sdl2::audio::{AudioCallback, AudioDevice, AudioSpecDesired};
 use sdl2::event::Event;
@@ -7,8 +7,14 @@ use sdl2::keyboard::{Keycode, Mod};
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::render::{Canvas, Texture};
 use sdl2::video::Window;
-
 use std::time::{Duration, Instant};
+
+// The correct ROM files must be placed at the paths below
+// They are not included since they are technically still under copyright
+// So make sure you only use ROMs that you have the legal right to use (lol)
+const FW_ROM: [u8; 0x3000] = *include_bytes!("../roms/apple2_plus.rom");
+const CHAR_ROM: [u8; 0x800] = *include_bytes!("../roms/char_set.rom");
+const DISK2_ROM: [u8; 0x100] = *include_bytes!("../roms/disk2.rom");
 
 const FRAME_RATE: u32 = 60;
 const US_PER_FRAME: u64 = 1000000 / FRAME_RATE as u64;
@@ -20,13 +26,13 @@ struct SdlVideo {
     texture: Texture,
 }
 
-impl graphics::Video for SdlVideo {
+impl grok_apple2::Video for SdlVideo {
     fn draw_frame(&mut self, frame: &[u8]) {
         self.texture
             .update(
                 None,
                 frame,
-                (graphics::DISP_WIDTH * graphics::PIXEL_SIZE) as usize,
+                (settings::DISP_WIDTH * settings::PIXEL_SIZE) as usize,
             )
             .unwrap();
         self.canvas.copy(&self.texture, None, None).unwrap();
@@ -57,7 +63,7 @@ impl SdlAudio {
         let audio_subsystem = sdl_context.audio().unwrap();
 
         let audio_spec = AudioSpecDesired {
-            freq: Some(sound::SAMPLE_RATE as i32),
+            freq: Some(settings::SAMPLE_RATE as i32),
             channels: Some(1),
             samples: Some(512),
         };
@@ -87,7 +93,7 @@ impl SdlAudio {
     }
 }
 
-impl sound::Audio for SdlAudio {
+impl grok_apple2::Audio for SdlAudio {
     fn feed_samples(&mut self, samples: &[bool]) {
         self.insert_samples(samples);
     }
@@ -158,8 +164,8 @@ fn main() {
     let window = video_subsystem
         .window(
             "Apple ][+",
-            graphics::DISP_WIDTH * graphics::DISP_SCALE,
-            graphics::DISP_HEIGHT * graphics::DISP_SCALE,
+            settings::DISP_WIDTH * settings::DISP_SCALE,
+            settings::DISP_HEIGHT * settings::DISP_SCALE,
         )
         .position_centered()
         .resizable()
@@ -171,8 +177,8 @@ fn main() {
     let texture = texture_creator
         .create_texture_static(
             PixelFormatEnum::RGB24,
-            graphics::DISP_WIDTH,
-            graphics::DISP_HEIGHT,
+            settings::DISP_WIDTH,
+            settings::DISP_HEIGHT,
         )
         .unwrap();
     let video = SdlVideo { canvas, texture };
@@ -180,9 +186,10 @@ fn main() {
     // Initialize audio
     let audio = SdlAudio::new(&sdl_context);
 
-    // Initialize Apple 2
-    let mut apple2 = Apple2::new(video, audio);
-    apple2.init();
+    // Initialize peripherals
+    let mut language_card = language::LanguageCard::new();
+    let mut disk_card =
+        disk::ControllerCard::new(DISK2_ROM, grok_apple2::settings::CPU_CLK_SPEED as usize);
 
     // Insert disk
     if args.len() > 1 {
@@ -193,12 +200,18 @@ fn main() {
             .and_then(|e| e.to_str())
             .unwrap_or("");
         match ext {
-            "woz" => apple2.insert_woz(&buffer),
-            "dsk" => apple2.insert_dsk(&buffer),
-            "po" => apple2.insert_po(&buffer),
+            "woz" => disk_card.insert_woz(&buffer),
+            "dsk" => disk_card.insert_dsk(&buffer),
+            "po" => disk_card.insert_po(&buffer),
             _ => panic!("Unsupported disk format: .{}", ext),
         }
     }
+
+    // Initialize Apple 2
+    let mut apple2 = Apple2::new(FW_ROM, CHAR_ROM, video, audio);
+    apple2.insert_peripheral(&mut language_card, 0);
+    apple2.insert_peripheral(&mut disk_card, 6);
+    apple2.init();
 
     // Main loop
     while handle_input(&mut apple2, &mut event_pump) {

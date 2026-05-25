@@ -5,35 +5,38 @@ TODO:
 -Handle proper reset behavior
 */
 
-use super::woz::WozImage;
-use grok_6502::bus::{Bus, SimpleBus};
+mod dsk2woz;
+mod woz;
+
+use grok_6502::bus::Bus;
+use woz::WozImage;
 
 const MAX_TRACK: u8 = 34;
 const MAX_PHASE: usize = 3;
 
 mod soft_switch {
-    const PERIPH_IO_ADDR: usize = 0xC080;
-
-    pub const PHASE0_OFF: usize = PERIPH_IO_ADDR;
-    pub const PHASE1_OFF: usize = PERIPH_IO_ADDR + 0x2;
-    pub const PHASE2_OFF: usize = PERIPH_IO_ADDR + 0x4;
-    pub const PHASE3_OFF: usize = PERIPH_IO_ADDR + 0x6;
-    pub const DRIVES_OFF: usize = PERIPH_IO_ADDR + 0x8;
-    pub const SEL_DRIVE1: usize = PERIPH_IO_ADDR + 0xA;
-    pub const SHIFT_OFF: usize = PERIPH_IO_ADDR + 0xC;
-    pub const DISK_READ: usize = PERIPH_IO_ADDR + 0xE;
-    pub const PHASE0_ON: usize = PERIPH_IO_ADDR + 0x1;
-    pub const PHASE1_ON: usize = PERIPH_IO_ADDR + 0x3;
-    pub const PHASE2_ON: usize = PERIPH_IO_ADDR + 0x5;
-    pub const PHASE3_ON: usize = PERIPH_IO_ADDR + 0x7;
-    pub const DRIVES_ON: usize = PERIPH_IO_ADDR + 0x9;
-    pub const SEL_DRIVE2: usize = PERIPH_IO_ADDR + 0xB;
-    pub const SHIFT_ON: usize = PERIPH_IO_ADDR + 0xD;
-    pub const DISK_WRITE: usize = PERIPH_IO_ADDR + 0xF;
+    pub const PHASE0_OFF: u8 = 0;
+    pub const PHASE1_OFF: u8 = 0x2;
+    pub const PHASE2_OFF: u8 = 0x4;
+    pub const PHASE3_OFF: u8 = 0x6;
+    pub const DRIVES_OFF: u8 = 0x8;
+    pub const SEL_DRIVE1: u8 = 0xA;
+    pub const SHIFT_OFF: u8 = 0xC;
+    pub const DISK_READ: u8 = 0xE;
+    pub const PHASE0_ON: u8 = 0x1;
+    pub const PHASE1_ON: u8 = 0x3;
+    pub const PHASE2_ON: u8 = 0x5;
+    pub const PHASE3_ON: u8 = 0x7;
+    pub const DRIVES_ON: u8 = 0x9;
+    pub const SEL_DRIVE2: u8 = 0xB;
+    pub const SHIFT_ON: u8 = 0xD;
+    pub const DISK_WRITE: u8 = 0xF;
 }
 
-pub struct Controller {
-    slot: usize,
+/// Disk II controller card emulator.
+pub struct ControllerCard {
+    rom: [u8; 0x100],
+    clk: usize,
     data_reg: u8,
     half_track: u8,
     current_phase: usize,
@@ -45,13 +48,14 @@ pub struct Controller {
     write_mode: bool,
     write_sense: bool,
     disk_image: Option<WozImage>,
-    motor_off_delay: u8,
+    motor_off_delay: usize,
 }
 
-impl Controller {
-    pub fn new(slot: usize) -> Self {
-        Controller {
-            slot,
+impl ControllerCard {
+    pub fn new(rom: [u8; 0x100], clk: usize) -> Self {
+        ControllerCard {
+            rom,
+            clk,
             data_reg: 0,
             half_track: 0,
             current_phase: 0,
@@ -67,112 +71,30 @@ impl Controller {
         }
     }
 
-    pub fn reset(&mut self) {
-        self.phases.fill(false);
-        self.current_phase = 0;
-        self.data_reg = 0;
-        self.write_mode = false;
-        self.write_sense = false;
-        self.motor_off_delay = 0;
-        self.drives_on = false;
+    pub fn insert_woz(&mut self, data: &[u8]) {
+        self.load_image(WozImage::new(data).unwrap());
+    }
+
+    pub fn insert_dsk(&mut self, data: &[u8]) {
+        self.load_image(WozImage::new_dsk(data).unwrap());
+    }
+
+    pub fn insert_po(&mut self, data: &[u8]) {
+        self.load_image(WozImage::new_po(data).unwrap());
     }
 
     pub fn load_image(&mut self, woz: WozImage) {
         self.disk_image = Some(woz);
     }
 
-    pub fn handle_motor_off_delay(&mut self) {
-        /* When drives are turned off, there is actually a one second delay before they actually
-        turn off. This is called every frame cycle starting at a count of 60. */
+    fn handle_motor_off_delay(&mut self) {
+        // There is actually a one second delay before drives actually turn off
         if self.motor_off_delay > 0 {
             self.motor_off_delay -= 1;
 
             if self.motor_off_delay == 0 {
                 self.drives_on = false;
             }
-        }
-    }
-
-    pub fn tick(&mut self, bus: &mut SimpleBus) {
-        if self.disk_image.is_none() {
-            return;
-        }
-
-        let address = bus.addr() as usize;
-        match address - self.slot {
-            // Off
-            soft_switch::PHASE0_OFF => {
-                self.phase_off(0);
-                self.read_bit(bus);
-            }
-            soft_switch::PHASE1_OFF => {
-                self.phase_off(1);
-                self.read_bit(bus);
-            }
-            soft_switch::PHASE2_OFF => {
-                self.phase_off(2);
-                self.read_bit(bus);
-            }
-            soft_switch::PHASE3_OFF => {
-                self.phase_off(3);
-                self.read_bit(bus);
-            }
-            soft_switch::DRIVES_OFF => {
-                self.motor_off_delay = 60; // 60 frames per second
-                self.read_bit(bus);
-            }
-            soft_switch::SEL_DRIVE1 => {
-                self.current_drive = 1;
-                self.read_bit(bus);
-            }
-            soft_switch::SHIFT_OFF => {
-                self.write_sense = false;
-                if !self.write_mode {
-                    self.read_bit(bus);
-                } else {
-                    // TODO: Actually write data to disk image
-                    // Copy data reg to disk byte pointer
-                    // I assume CPU waits for sequencer to shift out bits?
-                    // So can just do it in one go?
-                }
-            }
-            soft_switch::DISK_READ => {
-                self.write_mode = false;
-                self.read_bit(bus);
-            }
-
-            // On
-            soft_switch::PHASE0_ON => {
-                self.phase_on(0);
-            }
-            soft_switch::PHASE1_ON => {
-                self.phase_on(1);
-            }
-            soft_switch::PHASE2_ON => {
-                self.phase_on(2);
-            }
-            soft_switch::PHASE3_ON => {
-                self.phase_on(3);
-            }
-            soft_switch::DRIVES_ON => {
-                self.drives_on = true;
-                self.motor_off_delay = 0;
-            }
-            soft_switch::SEL_DRIVE2 => {
-                self.current_drive = 2;
-            }
-            soft_switch::SHIFT_ON => {
-                self.write_sense = true;
-                if self.write_mode {
-                    self.data_reg = bus.data();
-                } else {
-                    self.data_reg = 0; // Apprently reading this addr clears data register
-                }
-            }
-            soft_switch::DISK_WRITE => {
-                self.write_mode = true;
-            }
-            _ => {}
         }
     }
 
@@ -259,7 +181,7 @@ impl Controller {
         self.data_reg |= bit;
     }
 
-    fn read_bit(&mut self, bus: &mut SimpleBus) {
+    fn read_bit(&mut self, bus: &mut dyn Bus) {
         if !self.drives_on {
             return;
         }
@@ -284,5 +206,99 @@ impl Controller {
             self.data_reg = 0;
             self.reading_byte = false;
         }
+    }
+}
+
+impl crate::peripheral::Peripheral for ControllerCard {
+    fn tick(&mut self, _bus: &mut dyn Bus, _pins: &mut crate::peripheral::Pins) {
+        self.handle_motor_off_delay();
+    }
+
+    fn device_select(&mut self, bus: &mut dyn Bus, _pins: &mut crate::peripheral::Pins) {
+        if self.disk_image.is_none() {
+            return;
+        }
+
+        let addr = (bus.addr() & 0xF) as u8;
+        match addr {
+            // Off
+            soft_switch::PHASE0_OFF => {
+                self.phase_off(0);
+                self.read_bit(bus);
+            }
+            soft_switch::PHASE1_OFF => {
+                self.phase_off(1);
+                self.read_bit(bus);
+            }
+            soft_switch::PHASE2_OFF => {
+                self.phase_off(2);
+                self.read_bit(bus);
+            }
+            soft_switch::PHASE3_OFF => {
+                self.phase_off(3);
+                self.read_bit(bus);
+            }
+            soft_switch::DRIVES_OFF => {
+                self.motor_off_delay = self.clk;
+                self.read_bit(bus);
+            }
+            soft_switch::SEL_DRIVE1 => {
+                self.current_drive = 1;
+                self.read_bit(bus);
+            }
+            soft_switch::SHIFT_OFF => {
+                self.write_sense = false;
+                if !self.write_mode {
+                    self.read_bit(bus);
+                } else {
+                    // TODO: Actually write data to disk image
+                    // Copy data reg to disk byte pointer
+                    // I assume CPU waits for sequencer to shift out bits?
+                    // So can just do it in one go?
+                }
+            }
+            soft_switch::DISK_READ => {
+                self.write_mode = false;
+                self.read_bit(bus);
+            }
+
+            // On
+            soft_switch::PHASE0_ON => {
+                self.phase_on(0);
+            }
+            soft_switch::PHASE1_ON => {
+                self.phase_on(1);
+            }
+            soft_switch::PHASE2_ON => {
+                self.phase_on(2);
+            }
+            soft_switch::PHASE3_ON => {
+                self.phase_on(3);
+            }
+            soft_switch::DRIVES_ON => {
+                self.drives_on = true;
+                self.motor_off_delay = 0;
+            }
+            soft_switch::SEL_DRIVE2 => {
+                self.current_drive = 2;
+            }
+            soft_switch::SHIFT_ON => {
+                self.write_sense = true;
+                if self.write_mode {
+                    self.data_reg = bus.data();
+                } else {
+                    self.data_reg = 0; // Apprently reading this addr clears data register
+                }
+            }
+            soft_switch::DISK_WRITE => {
+                self.write_mode = true;
+            }
+            _ => {}
+        }
+    }
+
+    fn io_select(&mut self, bus: &mut dyn Bus, _pins: &mut crate::peripheral::Pins) {
+        let addr = (bus.addr() & 0xFF) as usize;
+        bus.set_data(self.rom[addr]);
     }
 }
