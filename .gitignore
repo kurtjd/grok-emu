@@ -1,3 +1,4 @@
 target/
 **/roms/
+**/disks/
 **/single-step-tests/

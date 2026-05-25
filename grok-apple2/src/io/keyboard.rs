@@ -1,21 +1,20 @@
-use grok_6502::bus::{self, Bus, SimpleBus};
+use grok_6502::bus::{self, Bus};
 
-const INPUT_DATA: u16 = 0xC000;
-const INPUT_CLEAR: u16 = 0xC010;
-const INPUT_END: u16 = 0xC01F;
+const DATA: u16 = 0;
+const CLEAR: u16 = 1;
 const KEY_RIGHT: u8 = 0x95;
 const KEY_LEFT: u8 = 0x88;
 
-pub(crate) struct Input {
+pub(crate) struct Keyboard {
     data: u8,
 }
 
-impl Input {
+impl Keyboard {
     pub(crate) fn new() -> Self {
-        Input { data: 0 }
+        Keyboard { data: 0 }
     }
 
-    pub(crate) fn set(&mut self, char: u8, shift: bool, ctrl: bool) {
+    pub(crate) fn input(&mut self, char: u8, shift: bool, ctrl: bool) {
         // Convert lowercase to uppercase
         let mut ascii = char;
         if ascii.is_ascii_lowercase() {
@@ -41,16 +40,16 @@ impl Input {
         self.data = ascii | (1 << 7);
     }
 
-    pub(crate) fn set_arrow(&mut self, right: bool) {
+    pub(crate) fn input_arrow(&mut self, right: bool) {
         let ascii = if right { KEY_RIGHT } else { KEY_LEFT };
         self.data = ascii;
     }
 
-    pub(crate) fn tick(&mut self, bus: &mut SimpleBus) {
-        match bus.addr() {
-            INPUT_DATA..INPUT_CLEAR if bus.op() == bus::Op::Read => bus.set_data(self.data),
-            INPUT_CLEAR..INPUT_END => self.data &= !(1 << 7),
-            _ => {}
+    pub(crate) fn decode(&mut self, bus: &mut dyn Bus) {
+        match (bus.addr() >> 4) & 0xF {
+            DATA if bus.op() == bus::Op::Read => bus.set_data(self.data),
+            CLEAR => self.data &= !(1 << 7),
+            _ => (),
         }
     }
 

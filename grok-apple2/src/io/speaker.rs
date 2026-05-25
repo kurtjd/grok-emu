@@ -1,14 +1,9 @@
-use grok_6502::bus::{Bus, SimpleBus};
+use super::Audio;
+use crate::settings;
 
-pub const SAMPLE_RATE: u32 = 44100;
+const CYCLES_PER_SAMPLE: u32 = settings::CPU_CLK_SPEED / settings::SAMPLE_RATE;
 
-const CYCLES_PER_SAMPLE: u32 = crate::settings::CPU_CLK_SPEED / SAMPLE_RATE;
-
-mod soft_switch {
-    pub const SPEAKER: usize = 0xC030; // Whole page
-}
-
-pub(crate) struct Sound<A: Audio> {
+pub(crate) struct Speaker<A: Audio> {
     audio: A,
     prev_polarity: bool,
     polarity: bool,
@@ -18,9 +13,9 @@ pub(crate) struct Sound<A: Audio> {
     samples: Vec<bool>,
 }
 
-impl<A: Audio> Sound<A> {
+impl<A: Audio> Speaker<A> {
     pub(crate) fn new(audio: A) -> Self {
-        Sound {
+        Speaker {
             audio,
             prev_polarity: false,
             polarity: false,
@@ -37,7 +32,7 @@ impl<A: Audio> Sound<A> {
         self.prev_polarity = self.polarity;
     }
 
-    pub(crate) fn tick(&mut self, bus: &SimpleBus) {
+    pub(crate) fn tick(&mut self) {
         self.cycles += 1;
 
         if self.cycles >= CYCLES_PER_SAMPLE {
@@ -47,10 +42,10 @@ impl<A: Audio> Sound<A> {
                 self.polarity_change = true;
             }
         }
+    }
 
-        if bus.addr() as usize == soft_switch::SPEAKER {
-            self.polarity = !self.polarity;
-        }
+    pub(crate) fn decode(&mut self) {
+        self.polarity = !self.polarity;
     }
 
     pub(crate) fn feed_samples(&mut self) {
@@ -61,8 +56,4 @@ impl<A: Audio> Sound<A> {
         }
         self.reset();
     }
-}
-
-pub trait Audio {
-    fn feed_samples(&mut self, samples: &[bool]);
 }
