@@ -21,19 +21,24 @@ const US_PER_FRAME: u64 = 1000000 / FRAME_RATE as u64;
 const SAMPLE_BUF_SZ: usize = 1024;
 const SAMPLE_VOLUME: f32 = 0.5;
 
-struct SdlVideo {
+struct SdlDisplay {
     canvas: Canvas<Window>,
     texture: Texture,
 }
 
-impl grok_apple2::Video for SdlVideo {
-    fn draw_frame(&mut self, frame: &[u8]) {
+impl SdlDisplay {
+    fn draw(&mut self, frame: &[u32]) {
         self.texture
-            .update(
-                None,
-                frame,
-                (settings::DISP_WIDTH * settings::PIXEL_SIZE) as usize,
-            )
+            .with_lock(None, |buf, pitch| {
+                for (src, dst) in frame
+                    .chunks_exact(settings::DISP_WIDTH as usize)
+                    .zip(buf.chunks_exact_mut(pitch))
+                {
+                    for (px, slot) in src.iter().zip(dst.chunks_exact_mut(4)) {
+                        slot.copy_from_slice(&px.to_ne_bytes());
+                    }
+                }
+            })
             .unwrap();
         self.canvas.copy(&self.texture, None, None).unwrap();
         self.canvas.present();
@@ -115,7 +120,7 @@ impl AudioCallback for SquareWave {
     }
 }
 
-fn handle_input(apple2: &mut Apple2<SdlVideo, SdlAudio>, event_pump: &mut EventPump) -> bool {
+fn handle_input(apple2: &mut Apple2<SdlAudio>, event_pump: &mut EventPump) -> bool {
     // TODO: Escape keys, and will need to change key for reset()
 
     for event in event_pump.poll_iter() {
@@ -175,13 +180,13 @@ fn main() {
     let canvas = window.into_canvas().build().unwrap();
     let texture_creator = canvas.texture_creator();
     let texture = texture_creator
-        .create_texture_static(
-            PixelFormatEnum::RGB24,
+        .create_texture_streaming(
+            PixelFormatEnum::RGB888,
             settings::DISP_WIDTH,
             settings::DISP_HEIGHT,
         )
         .unwrap();
-    let video = SdlVideo { canvas, texture };
+    let mut display = SdlDisplay { canvas, texture };
 
     // Initialize audio
     let audio = SdlAudio::new(&sdl_context);
@@ -208,7 +213,7 @@ fn main() {
     }
 
     // Initialize Apple 2
-    let mut apple2 = Apple2::new(FW_ROM, CHAR_ROM, video, audio);
+    let mut apple2 = Apple2::new(FW_ROM, CHAR_ROM, audio);
     apple2.insert_peripheral(&mut language_card, 0);
     apple2.insert_peripheral(&mut disk_card, 6);
     apple2.init();
@@ -216,7 +221,8 @@ fn main() {
     // Main loop
     while handle_input(&mut apple2, &mut event_pump) {
         let start_time = Instant::now();
-        apple2.run_frame(FRAME_RATE);
+        let frame = apple2.run_frame();
+        display.draw(frame);
         let elapsed = Duration::from_micros(start_time.elapsed().as_micros() as u64);
 
         // Sleep for rest of frame period
