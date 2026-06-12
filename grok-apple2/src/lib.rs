@@ -2,7 +2,7 @@ pub mod io;
 mod memory;
 pub mod peripheral;
 
-pub use io::{Audio, Video};
+pub use io::Audio;
 
 mod mem_map {
     pub const RAM: u16 = 0x0000;
@@ -38,42 +38,41 @@ pub mod settings {
     pub const DISP_WIDTH: u32 = 280;
     pub const DISP_HEIGHT: u32 = 192;
     pub const DISP_SCALE: u32 = 3;
-    pub const PIXEL_SIZE: u32 = 3;
     pub const SAMPLE_RATE: u32 = 44100;
 }
 
 use grok_6502::Cpu;
 use grok_6502::bus::{Bus, SimpleBus};
 use io::Io;
-use io::graphics::{CHAR_ROM_SIZE, Graphics};
 use io::keyboard::Keyboard;
 use io::speaker::Speaker;
+use io::video::{self, CHAR_ROM_SIZE, Video};
 use memory::{ROM_SIZE, Ram, Rom};
 use peripheral::{Peripheral, Peripherals};
 
-pub struct Apple2<'a, V: Video, A: Audio> {
+pub struct Apple2<'a, A: Audio> {
     bus: SimpleBus,
     cpu: Cpu,
     rom: Rom,
     ram: Ram,
-    io: Io<V, A>,
+    io: Io<A>,
     peripherals: Peripherals<'a>,
 }
 
-impl<'a, V: Video, A: Audio> Apple2<'a, V, A> {
-    pub fn new(fw_rom: [u8; ROM_SIZE], char_rom: [u8; CHAR_ROM_SIZE], video: V, audio: A) -> Self {
+impl<'a, A: Audio> Apple2<'a, A> {
+    pub fn new(fw_rom: [u8; ROM_SIZE], char_rom: [u8; CHAR_ROM_SIZE], audio: A) -> Self {
         let bus = SimpleBus::new();
         let cpu = Cpu::new();
 
         let ram = Ram::new();
         let rom = Rom::new(fw_rom);
 
-        let graphics = Graphics::new(char_rom, video);
+        let video = Video::new(char_rom);
         let speaker = Speaker::new(audio);
         let keyboard = Keyboard::new();
         let io = Io {
             keyboard,
-            graphics,
+            video,
             speaker,
             game: Default::default(),
         };
@@ -98,36 +97,47 @@ impl<'a, V: Video, A: Audio> Apple2<'a, V, A> {
         self.reset();
     }
 
-    pub fn run_frame(&mut self, frame_rate: u32) {
-        let cycles_per_frame = settings::CPU_CLK_SPEED / frame_rate;
-
-        // Note: Not very accurate since we only snapshot the graphics memory at the end of frame,
-        // but wanna make this update per cpu cycle so we can emulate those racing the beam tricks
-        self.io.graphics.draw(frame_rate, &self.ram[..]);
-
+    pub fn run_frame(&mut self) -> &[u32] {
         // Tick the various components for this frame
-        for _ in 0..cycles_per_frame {
-            // Tick the CPU one clock phase so it can announce address on the bus
-            self.cpu.tick(&mut self.bus);
+        for vscan in 0..video::VSCAN_MAX {
+            for hscan in 0..video::HSCAN_MAX {
+                // Maybe a sort of hackish way to emulate cycle stealing for video
+                // Basically in reality a memory access takes only one clock phase,
+                // so video can access memory on the first phase and then cpu on the next.
+                // But, we sort of have memory accesses take 2 phases in code because
+                // we need a chance for the memory module to see the bus activity between
+                // driving the address bus and reading the data bus.
+                //
+                // So: Tick the video twice, then tick cpu twice and handle all other updates there.
+                // It is safe to call `decode` here because video will only put RAM addresses on the bus.
+                self.io.video.tick(vscan, hscan, &mut self.bus);
+                self.decode();
+                self.io.video.tick(vscan, hscan, &mut self.bus);
 
-            // Then give peripherals a chance to react first in case they need to inhibit ROM
-            self.peripherals.tick(&mut self.bus);
+                // Tick the CPU one clock phase so it can announce address on the bus
+                self.cpu.tick(&mut self.bus);
 
-            // Update the speaker state
-            self.io.speaker.tick();
+                // Then give peripherals a chance to react first in case they need to inhibit ROM
+                self.peripherals.tick(&mut self.bus);
 
-            // Update the bus state
-            self.bus.tick();
+                // Update the speaker state
+                self.io.speaker.tick();
 
-            // Then decode the address and dispatch to appropriate component
-            self.decode();
+                // Update the bus state
+                self.bus.tick();
 
-            // Then finally tick the CPU one more clock phase to react to the data bus
-            self.cpu.tick(&mut self.bus);
+                // Then decode the address and dispatch to appropriate component
+                self.decode();
+
+                // Then finally tick the CPU one more clock phase to react to the data bus
+                self.cpu.tick(&mut self.bus);
+            }
         }
 
         // We've collected samples during the frame, so feed them to the audio output
         self.io.speaker.feed_samples();
+
+        self.io.video.render()
     }
 
     pub fn input(&mut self, char: u8, shift: bool, ctrl: bool) {
