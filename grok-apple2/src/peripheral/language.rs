@@ -174,4 +174,8 @@ impl super::Peripheral for LanguageCard {
             _ => {}
         }
     }
+
+    fn io_strobe(&mut self, _bus: &mut dyn Bus, _pins: &mut super::Pins) {
+        // Intentionally do nothing
+    }
 }

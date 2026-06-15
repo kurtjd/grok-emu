@@ -301,4 +301,8 @@ impl crate::peripheral::Peripheral for ControllerCard {
         let addr = (bus.addr() & 0xFF) as usize;
         bus.set_data(self.rom[addr]);
     }
+
+    fn io_strobe(&mut self, _bus: &mut dyn Bus, _pins: &mut super::Pins) {
+        // Intentionally do nothing
+    }
 }

@@ -1,4 +1,4 @@
-use grok_apple2::peripheral::{disk, language};
+use grok_apple2::peripheral::{disk, language, serial};
 use grok_apple2::{Apple2, settings};
 use sdl2::EventPump;
 use sdl2::audio::{AudioCallback, AudioDevice, AudioSpecDesired};
@@ -7,6 +7,9 @@ use sdl2::keyboard::{Keycode, Mod};
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::render::{Canvas, Texture};
 use sdl2::video::Window;
+use serialport::{SerialPort, TTYPort};
+use std::io::{Read, Write};
+use std::process::Command;
 use std::time::{Duration, Instant};
 
 // The correct ROM files must be placed at the paths below
@@ -15,11 +18,132 @@ use std::time::{Duration, Instant};
 const FW_ROM: [u8; 0x3000] = *include_bytes!("../roms/apple2_plus.rom");
 const CHAR_ROM: [u8; 0x800] = *include_bytes!("../roms/char_set.rom");
 const DISK2_ROM: [u8; 0x100] = *include_bytes!("../roms/disk2.rom");
+const SSC_ROM: [u8; 0x800] = *include_bytes!("../roms/ssc.rom");
 
 const FRAME_RATE: u32 = 60;
 const US_PER_FRAME: u64 = 1000000 / FRAME_RATE as u64;
 const SAMPLE_BUF_SZ: usize = 1024;
 const SAMPLE_VOLUME: f32 = 0.5;
+
+// TODO: Make this more flexible by also allowing user to pass in existing port etc
+struct StdSerialPort(TTYPort);
+impl StdSerialPort {
+    fn new() -> Self {
+        const VIRTUAL_PORT_LINK: &str = "/dev/ttyUSB9";
+
+        let (mut master, slave) = TTYPort::pair().expect("Failed to create virtual serial port");
+
+        master
+            .set_timeout(Duration::from_millis(0))
+            .expect("Failed to configure virtual serial port");
+
+        if let Some(name) = slave.name() {
+            // Revisit: Get rid of this
+            //
+            // Specifically here because ADTPro is annoying and doesn't let you enter port manually,
+            // and only scans /dev/ttyUSB*, etc (but never /dev/pts/n) so we have to do this
+            // nasty hack
+            let linked = Command::new("sudo")
+                .args(["ln", "-sf", &name, VIRTUAL_PORT_LINK])
+                .status()
+                .is_ok_and(|status| status.success());
+
+            if linked {
+                println!("Super Serial Card available at {VIRTUAL_PORT_LINK} (-> {name})");
+            } else {
+                println!(
+                    "Super Serial Card available at {name} \
+                     (couldn't sudo-link {VIRTUAL_PORT_LINK})"
+                );
+            }
+        }
+
+        Self(master)
+    }
+}
+
+impl serial::SerialPort for StdSerialPort {
+    fn read(&mut self) -> Option<u8> {
+        let mut buf = [0];
+        match self.0.read(&mut buf) {
+            Ok(1) => Some(buf[0]),
+            _ => None,
+        }
+    }
+
+    fn write(&mut self, data: u8) {
+        let _ = self.0.write(&[data]);
+    }
+
+    fn set_baud(&mut self, baud: serial::Baud) {
+        let _ = self.0.set_baud_rate(baud.into());
+    }
+
+    fn set_word_length(&mut self, word_length: serial::WordLength) {
+        let d = match word_length {
+            serial::WordLength::_5 => serialport::DataBits::Five,
+            serial::WordLength::_6 => serialport::DataBits::Six,
+            serial::WordLength::_7 => serialport::DataBits::Seven,
+            serial::WordLength::_8 => serialport::DataBits::Eight,
+        };
+        let _ = self.0.set_data_bits(d);
+    }
+
+    fn set_stop_bits(&mut self, stop_bits: serial::StopBits) {
+        let s = match stop_bits {
+            serial::StopBits::_1 => serialport::StopBits::One,
+            serial::StopBits::_2 => serialport::StopBits::Two,
+        };
+        let _ = self.0.set_stop_bits(s);
+    }
+
+    fn set_parity(&mut self, parity: serial::Parity) {
+        let p = match parity {
+            serial::Parity::None | serial::Parity::Mark | serial::Parity::Space => {
+                serialport::Parity::None
+            }
+            serial::Parity::Odd => serialport::Parity::Odd,
+            serial::Parity::Even => serialport::Parity::Even,
+        };
+        let _ = self.0.set_parity(p);
+    }
+
+    fn rts_assert(&mut self, _assert: bool) {
+        // Do nothing
+    }
+
+    fn brk_assert(&mut self, _assert: bool) {
+        // Do nothing
+    }
+
+    fn cts_asserted(&mut self) -> bool {
+        true
+    }
+
+    fn dtr_assert(&mut self, _assert: bool) {
+        // Do nothing
+    }
+
+    fn dsr_asserted(&mut self) -> bool {
+        true
+    }
+
+    fn dcd_asserted(&mut self) -> bool {
+        true
+    }
+
+    fn parity_err(&mut self) -> bool {
+        false
+    }
+
+    fn framing_err(&mut self) -> bool {
+        false
+    }
+
+    fn overrun(&mut self) -> bool {
+        false
+    }
+}
 
 struct SdlDisplay {
     canvas: Canvas<Window>,
@@ -193,6 +317,12 @@ fn main() {
 
     // Initialize peripherals
     let mut language_card = language::LanguageCard::new();
+
+    // Setup for ADTPro
+    let sw1 = 0b1111001;
+    let sw2 = 0b0011011;
+    let mut serial_card = serial::SuperSerial::new(StdSerialPort::new(), SSC_ROM, sw1, sw2);
+
     let mut disk_card =
         disk::ControllerCard::new(DISK2_ROM, grok_apple2::settings::CPU_CLK_SPEED as usize);
 
@@ -215,6 +345,7 @@ fn main() {
     // Initialize Apple 2
     let mut apple2 = Apple2::new(FW_ROM, CHAR_ROM, audio);
     apple2.insert_peripheral(&mut language_card, 0);
+    apple2.insert_peripheral(&mut serial_card, 2);
     apple2.insert_peripheral(&mut disk_card, 6);
     apple2.init();
 
