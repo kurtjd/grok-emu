@@ -1,5 +1,6 @@
 pub mod disk;
 pub mod language;
+pub mod serial;
 
 use crate::mem_map;
 use grok_6502::bus::Bus;
@@ -35,6 +36,7 @@ pub(crate) struct Peripherals<'a> {
     pub(crate) pins: Pins,
     // Chose to own references instead of boxing it up to keep this no_std compatible
     pub(crate) slots: [Option<&'a mut dyn Peripheral>; NUM_SLOTS],
+    active_slot: usize,
 }
 
 impl Default for Peripherals<'_> {
@@ -42,6 +44,7 @@ impl Default for Peripherals<'_> {
         Peripherals {
             pins: Pins::new(),
             slots: [const { None }; NUM_SLOTS],
+            active_slot: 0,
         }
     }
 }
@@ -57,6 +60,8 @@ impl Peripherals<'_> {
         let slot = (bus.addr() - mem_map::DEVICE_SELECT) / 0x10;
 
         if let Some(peripheral) = &mut self.slots[slot as usize] {
+            // Sather 6-4: Device select can also enable extended ROM
+            self.active_slot = slot as usize;
             peripheral.device_select(bus, &mut self.pins);
         }
     }
@@ -66,6 +71,8 @@ impl Peripherals<'_> {
         let slot = ((bus.addr() - mem_map::IO_SELECT) / 0x100) + 1;
 
         if let Some(peripheral) = &mut self.slots[slot as usize] {
+            // Sather 6-4
+            self.active_slot = slot as usize;
             peripheral.io_select(bus, &mut self.pins);
         }
     }
@@ -74,7 +81,12 @@ impl Peripherals<'_> {
         match bus.addr() {
             mem_map::DEVICE_SELECT..mem_map::IO_SELECT => self.device_select(bus),
             mem_map::IO_SELECT..mem_map::IO_STROBE => self.io_select(bus),
-            mem_map::IO_STROBE.. => (),
+            mem_map::IO_STROBE.. if let Some(peripheral) = &mut self.slots[self.active_slot] => {
+                // Note: Not checking for the magic value of $CFFF because we are not leaving it
+                // up to each peripheral to decide if it will respond to IO strobe or not
+                // (though on real hardware a card could misbehave and cause conflicts)
+                peripheral.io_strobe(bus, &mut self.pins);
+            }
             _ => unreachable!(),
         }
     }
@@ -96,4 +108,10 @@ pub trait Peripheral {
 
     /// Called when the peripheral's I/O space ($C0nx) is selected.
     fn device_select(&mut self, bus: &mut dyn Bus, pins: &mut Pins);
+
+    /// Called when an address in range $C800-$CFFF is put on the bus,
+    /// and this peripheral was the last to be addressed by IO Select or Device Select.
+    ///
+    /// This allows the peripheral to make use of the extended ROM range.
+    fn io_strobe(&mut self, bus: &mut dyn Bus, pins: &mut Pins);
 }
