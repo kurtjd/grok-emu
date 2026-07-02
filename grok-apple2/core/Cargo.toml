@@ -1,5 +1,5 @@
 [package]
-name = "grok-apple2"
+name = "grok-apple2-core"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
@@ -7,6 +7,4 @@ repository.workspace = true
 
 [dependencies]
 bitfield-struct = "0.13.0"
-grok-6502 = { path = "../grok-6502" }
-sdl2 = { version = "0.36.0", features = ["unsafe_textures"] }
-serialport = "4"
+grok-6502 = { path = "../../grok-6502" }

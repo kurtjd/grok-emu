@@ -13,6 +13,7 @@
     "rust-analyzer.linkedProjects": [
         "Cargo.toml",
         "grok-6502/Cargo.toml",
-        "grok-apple2/Cargo.toml",
+        "grok-apple2/core/Cargo.toml",
+        "grok-apple2/frontend/Cargo.toml",
     ]
 }

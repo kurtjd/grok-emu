@@ -124,10 +124,17 @@ dependencies = [
 name = "grok-apple2"
 version = "0.1.0"
 dependencies = [
- "bitfield-struct",
- "grok-6502",
+ "grok-apple2-core",
  "sdl2",
  "serialport",
+]
+
+[[package]]
+name = "grok-apple2-core"
+version = "0.1.0"
+dependencies = [
+ "bitfield-struct",
+ "grok-6502",
 ]
 
 [[package]]

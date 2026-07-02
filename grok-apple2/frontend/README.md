@@ -24,7 +24,7 @@ However the base Apple II+ was still a powerful machine for its time so plenty o
 
 ## Features
 ### MOS 6502 CPU
-Uses [grok-6502](../grok-6502/README.md) as the CPU core.
+Uses [grok-6502](../../grok-6502/README.md) as the CPU core.
 
 ### Display
 Supports text, lores, hires, and mixed mode graphics.
