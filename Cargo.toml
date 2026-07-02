@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["grok-6502", "grok-apple2"]
+members = ["grok-6502", "grok-apple2/core", "grok-apple2/frontend"]
 
 [workspace.package]
 edition = "2024"

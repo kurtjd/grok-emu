@@ -1,5 +1,5 @@
-use grok_apple2::peripheral::{disk, language, serial};
-use grok_apple2::{Apple2, settings};
+use grok_apple2_core::peripheral::{disk, language, serial};
+use grok_apple2_core::{Apple2, settings};
 use sdl2::EventPump;
 use sdl2::audio::{AudioCallback, AudioDevice, AudioSpecDesired};
 use sdl2::event::Event;
@@ -222,7 +222,7 @@ impl SdlAudio {
     }
 }
 
-impl grok_apple2::Audio for SdlAudio {
+impl grok_apple2_core::Audio for SdlAudio {
     fn feed_samples(&mut self, samples: &[bool]) {
         self.insert_samples(samples);
     }
@@ -323,8 +323,7 @@ fn main() {
     let sw2 = 0b0011011;
     let mut serial_card = serial::SuperSerial::new(StdSerialPort::new(), SSC_ROM, sw1, sw2);
 
-    let mut disk_card =
-        disk::ControllerCard::new(DISK2_ROM, grok_apple2::settings::CPU_CLK_SPEED as usize);
+    let mut disk_card = disk::ControllerCard::new(DISK2_ROM, settings::CPU_CLK_SPEED as usize);
 
     // Insert disk
     if args.len() > 1 {
