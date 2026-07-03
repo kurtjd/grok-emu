@@ -7,5 +7,12 @@ repository.workspace = true
 
 [dependencies]
 grok-apple2-core = { path = "../core" }
-sdl2 = { version = "0.36.0", features = ["unsafe_textures"] }
+eframe = { version = "0.35", default-features = false, features = [
+    "glow",
+    "wayland",
+    "x11",
+    "default_fonts",
+    "accesskit",
+] }
+cpal = "0.16"
 serialport = "4"
