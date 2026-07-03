@@ -15,7 +15,10 @@ pub fn menu_bar(ui: &mut egui::Ui) -> Option<UiAction> {
 
     egui::containers::menu::MenuBar::new().ui(ui, |ui| {
         ui.menu_button("File", |ui| {
-            if ui.button("Reset").clicked() {
+            if ui
+                .add(egui::Button::new("Reset").shortcut_text("F2"))
+                .clicked()
+            {
                 action = Some(UiAction::Reset);
                 ui.close();
             }

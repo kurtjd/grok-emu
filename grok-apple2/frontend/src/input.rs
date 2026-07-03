@@ -5,6 +5,8 @@ use eframe::egui;
 const RETURN: u8 = b'\r';
 /// ASCII backspace — the Apple II's delete/rubout code.
 const BACKSPACE: u8 = 0x08;
+/// ASCII escape — the Apple II's Esc key.
+const ESCAPE: u8 = 0x1B;
 
 /// Map an egui key to the *base* (unshifted) ASCII byte the core expects.
 /// The core handles uppercasing and shift-symbol resolution itself, so we only
@@ -95,9 +97,11 @@ pub fn handle_input(machine: &mut Machine, ctx: &egui::Context) {
                 modifiers,
                 ..
             } => match key {
-                egui::Key::Escape => machine.reset(),
+                // F2 is a host-side reset shortcut, not an emulated key.
+                egui::Key::F2 => machine.reset(),
                 egui::Key::ArrowRight => machine.input_arrow(true),
                 egui::Key::ArrowLeft => machine.input_arrow(false),
+                egui::Key::Escape => machine.input(ESCAPE, false, false),
                 egui::Key::Enter => machine.input(RETURN, false, false),
                 egui::Key::Backspace => machine.input(BACKSPACE, false, false),
                 // Printables come through Event::Text above; here we only forward

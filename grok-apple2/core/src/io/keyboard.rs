@@ -4,6 +4,9 @@ const DATA: u16 = 0;
 const CLEAR: u16 = 1;
 const KEY_RIGHT: u8 = 0x95;
 const KEY_LEFT: u8 = 0x88;
+const ESCAPE: u8 = 0x1B;
+const BACKSPACE: u8 = 0x08;
+const RETURN: u8 = b'\r';
 
 pub(crate) struct Keyboard {
     data: u8,
@@ -54,8 +57,7 @@ impl Keyboard {
     }
 
     fn is_valid_key(&self, ascii: u8) -> bool {
-        // 8 = ASCII for backspace, 13 = ASCII for return/enter
-        matches!(ascii, b' '..=b'^' | b'_' | 8 | 13)
+        matches!(ascii, b' '..=b'^' | b'_' | BACKSPACE | RETURN | ESCAPE)
     }
 
     fn get_shift_ascii(&self, ascii: u8) -> u8 {
@@ -85,9 +87,10 @@ impl Keyboard {
 
     fn get_ctrl_ascii(&self, ascii: u8) -> u8 {
         // Ctrl only modified A-Z keys by clearing the 6th bit
-        match ascii.is_ascii_uppercase() {
-            true => ascii & !(1 << 6),
-            false => ascii,
+        if ascii.is_ascii_uppercase() {
+            ascii & !(1 << 6)
+        } else {
+            ascii
         }
     }
 }
