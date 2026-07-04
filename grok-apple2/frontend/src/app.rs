@@ -7,6 +7,7 @@ use eframe::egui;
 use grok_apple2_core::peripheral::serial::SuperSerial;
 use grok_apple2_core::peripheral::{Peripheral, disk, language};
 use grok_apple2_core::{Apple2, settings};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 // The correct ROM files must be placed at the paths below
@@ -41,13 +42,19 @@ pub struct App {
     // A handle to the audio ring buffer shared with the live output stream, used
     // to build a fresh sink for the emulator when it's rebuilt on a power cycle.
     audio_ring: std::sync::Arc<std::sync::Mutex<std::collections::VecDeque<f32>>>,
+    // Mutes the audio output stream when set. Lives in the (never-rebuilt) output
+    // stream, so muting persists across power cycles.
+    audio_muted: std::sync::Arc<AtomicBool>,
+    // When true, emulation is frozen: `run_frame` is skipped so the display holds
+    // the last frame and the audio ring drains to silence.
+    paused: bool,
     // Held to keep the audio stream alive for the lifetime of the app.
     _audio_stream: cpal::Stream,
 }
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let (audio, audio_stream) = audio::init_audio();
+        let (audio, audio_stream, audio_muted) = audio::init_audio();
         // Keep a handle to the ring so a power cycle can build a new sink for the
         // still-running output stream rather than restarting the audio device.
         let audio_ring = audio.ring();
@@ -73,6 +80,8 @@ impl App {
             disk_images,
             serial,
             audio_ring,
+            audio_muted,
+            paused: false,
             _audio_stream: audio_stream,
         }
     }
@@ -86,6 +95,16 @@ impl App {
         let audio = CpalAudio::new(self.audio_ring.clone());
         self.apple2 = build_machine(audio, &self.slots, &self.serial, &self.disk_images);
         self.next_frame = Instant::now();
+    }
+
+    /// Freeze or resume emulation. When resuming, the frame clock is reset to now
+    /// so the machine picks up from the current frame instead of stampeding
+    /// through a backlog of "missed" frames accrued while paused.
+    fn set_paused(&mut self, paused: bool) {
+        self.paused = paused;
+        if !paused {
+            self.next_frame = Instant::now();
+        }
     }
 }
 
@@ -189,15 +208,25 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
 
-        // The F3 shortcut can't be handled inside `handle_input` (it only sees
-        // the machine, not the whole app), so it bubbles up as a request here.
-        if input::handle_input(&mut self.apple2, &ctx) {
+        // Host-side keyboard shortcuts (power cycle, pause, mute) can't be
+        // handled inside `handle_input` since they touch the whole app, not just
+        // the machine, so they bubble up as requests here. Emulated keys are
+        // swallowed while paused.
+        let requests = input::handle_input(&mut self.apple2, &ctx, self.paused);
+        if requests.power_cycle {
             self.power_cycle();
+        }
+        if requests.toggle_pause {
+            self.set_paused(!self.paused);
+        }
+        if requests.toggle_mute {
+            self.audio_muted.fetch_xor(true, Ordering::Relaxed);
         }
 
         // Advance the emulation at a fixed 60 Hz regardless of how often eframe
-        // repaints (input events can trigger extra repaints).
-        if Instant::now() >= self.next_frame {
+        // repaints (input events can trigger extra repaints). Skipped while
+        // paused so the machine freezes on the current frame.
+        if !self.paused && Instant::now() >= self.next_frame {
             let frame = self.apple2.run_frame();
             self.display.update(frame);
 
@@ -210,12 +239,21 @@ impl eframe::App for App {
         }
 
         egui::Panel::top("toolbar").show(ui, |ui| {
-            if let Some(action) = gui::menu_bar(ui, &self.slots, &self.disk_names, &mut self.serial)
-            {
+            if let Some(action) = gui::menu_bar(
+                ui,
+                &self.slots,
+                &self.disk_names,
+                &mut self.serial,
+                self.paused,
+                self.audio_muted.load(Ordering::Relaxed),
+            ) {
                 match action {
                     UiAction::Reset => self.apple2.reset(),
                     UiAction::PowerCycle => self.power_cycle(),
-                    UiAction::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+                    UiAction::TogglePause => self.set_paused(!self.paused),
+                    UiAction::ToggleMute => {
+                        self.audio_muted.fetch_xor(true, Ordering::Relaxed);
+                    }
                     UiAction::InsertCard { slot, kind } => {
                         self.apple2
                             .insert_peripheral(build_card(kind, &self.serial), slot);
@@ -257,8 +295,12 @@ impl eframe::App for App {
             self.display.draw(ui);
         });
 
-        // Wake us up in time for the next emulated frame.
-        let wait = self.next_frame.saturating_duration_since(Instant::now());
-        ctx.request_repaint_after(wait);
+        // Wake us up in time for the next emulated frame. While paused there's no
+        // next frame, so we don't schedule a repaint: egui idles and repaints
+        // only on interaction (which is how the Resume button stays responsive).
+        if !self.paused {
+            let wait = self.next_frame.saturating_duration_since(Instant::now());
+            ctx.request_repaint_after(wait);
+        }
     }
 }
