@@ -1,3 +1,4 @@
+use crate::gui::ScreenAspect;
 use eframe::egui;
 use grok_apple2_core::settings;
 
@@ -14,6 +15,8 @@ const SCREENSHOT_SCALE: u32 = 3;
 pub struct Display {
     tex: egui::TextureHandle,
     rgba: Vec<u8>,
+    // How the framebuffer is fitted to the window (shape + texture filtering).
+    aspect: ScreenAspect,
 }
 
 impl Display {
@@ -24,6 +27,7 @@ impl Display {
         Self {
             tex,
             rgba: Vec::with_capacity(DISP_W * DISP_H * 4),
+            aspect: ScreenAspect::default(),
         }
     }
 
@@ -36,15 +40,52 @@ impl Display {
                 .flat_map(|&px| [(px >> 16) as u8, (px >> 8) as u8, px as u8, 0xFF]),
         );
         let img = egui::ColorImage::from_rgba_unmultiplied([DISP_W, DISP_H], &self.rgba);
-        self.tex.set(img, egui::TextureOptions::NEAREST);
+        self.tex.set(img, self.filter());
     }
 
-    /// Draw the display, letterboxed within the available area.
+    /// Texture sampling for the current aspect: crisp nearest for square pixels,
+    /// soft linear for the 4:3 stretch (more CRT-like, and hides the uneven pixel
+    /// doubling that a non-integer vertical stretch would otherwise produce).
+    fn filter(&self) -> egui::TextureOptions {
+        match self.aspect {
+            ScreenAspect::Square => egui::TextureOptions::NEAREST,
+            ScreenAspect::FourThree => egui::TextureOptions::LINEAR,
+        }
+    }
+
+    /// Change how the framebuffer is fitted to the window. Re-uploads the current
+    /// frame with the new sampling right away so a filter change shows even while
+    /// paused; the geometry updates on the next `draw`.
+    pub fn set_aspect(&mut self, aspect: ScreenAspect) {
+        if self.aspect == aspect {
+            return;
+        }
+        self.aspect = aspect;
+        if self.rgba.len() == DISP_W * DISP_H * 4 {
+            let img = egui::ColorImage::from_rgba_unmultiplied([DISP_W, DISP_H], &self.rgba);
+            self.tex.set(img, self.filter());
+        }
+    }
+
+    /// Draw the display, letterboxed within the available area at the selected
+    /// aspect ratio (native square pixels, or a real 4:3 monitor shape).
     pub fn draw(&self, ui: &mut egui::Ui) {
         let avail = ui.available_size();
-        let scale = (avail.x / DISP_W as f32).min(avail.y / DISP_H as f32);
-        let size = egui::vec2(DISP_W as f32, DISP_H as f32) * scale;
-        let img = egui::Image::new(egui::load::SizedTexture::new(self.tex.id(), size));
+        let target = match self.aspect {
+            ScreenAspect::Square => DISP_W as f32 / DISP_H as f32,
+            ScreenAspect::FourThree => 4.0 / 3.0,
+        };
+        // Fit the largest `target`-ratio rectangle inside the available area.
+        let mut w = avail.x;
+        let mut h = w / target;
+        if h > avail.y {
+            h = avail.y;
+            w = h * target;
+        }
+        let img = egui::Image::new(egui::load::SizedTexture::new(
+            self.tex.id(),
+            egui::vec2(w, h),
+        ));
         ui.centered_and_justified(|ui| {
             ui.add(img);
         });

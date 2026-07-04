@@ -68,6 +68,16 @@ impl Default for SerialConfig {
     }
 }
 
+/// How the emulated display is fitted to the window.
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub enum ScreenAspect {
+    /// Native square-pixel shape (280:192), nearest-neighbour: crisp and modern.
+    #[default]
+    Square,
+    /// Real Apple II 4:3 monitor shape, linear-filtered: authentic and softer.
+    FourThree,
+}
+
 /// An action requested via the toolbar, executed by the app.
 pub enum UiAction {
     Reset,
@@ -81,6 +91,8 @@ pub enum UiAction {
     ToggleMute,
     /// Prompt for a path and save the current screen as a PNG image.
     Screenshot,
+    /// Toggle borderless fullscreen.
+    ToggleFullscreen,
     /// Insert (or replace) a card of `kind` into `slot`.
     InsertCard {
         slot: usize,
@@ -101,6 +113,19 @@ pub enum UiAction {
     },
 }
 
+/// Current runtime state the toolbar reflects in its toggle buttons.
+#[derive(Clone, Copy)]
+pub struct ToolbarState {
+    /// Emulation is frozen.
+    pub paused: bool,
+    /// Fast-forward (Nx) is active.
+    pub fast_forward: bool,
+    /// Audio output is muted.
+    pub muted: bool,
+    /// The window is currently fullscreen.
+    pub fullscreen: bool,
+}
+
 /// Render the top toolbar. Returns the action the user triggered, if any.
 ///
 /// This is intentionally free of any emulator or window state so the toolbar
@@ -108,16 +133,15 @@ pub enum UiAction {
 /// `slots` is a read-only snapshot of which card occupies each slot so the menu
 /// can label slots and highlight the active card. `disk_names` holds the name of
 /// the disk image loaded into each slot's Drive 1 (if any), for display.
-/// `paused` and `muted` reflect current state so the toggle buttons can show it.
-/// `fast_forward` likewise reflects whether 4x emulation is active.
+/// `state` reflects current runtime state so the toggle buttons can show it, and
+/// `aspect` is the display's fit mode, mutated in place by the Video menu.
 pub fn menu_bar(
     ui: &mut egui::Ui,
     slots: &[Option<CardKind>; NUM_SLOTS],
     disk_names: &[Option<String>; NUM_SLOTS],
     serial: &mut SerialConfig,
-    paused: bool,
-    fast_forward: bool,
-    muted: bool,
+    aspect: &mut ScreenAspect,
+    state: ToolbarState,
 ) -> Option<UiAction> {
     let mut action = None;
 
@@ -205,6 +229,26 @@ pub fn menu_bar(
                 }
             });
 
+            ui.menu_button("Video", |ui| {
+                ui.menu_button("Aspect Ratio", |ui| {
+                    // Square = native pixels (crisp). 4:3 = real monitor shape,
+                    // linear-filtered for an authentic softer look.
+                    ui.radio_value(aspect, ScreenAspect::Square, "Square");
+                    ui.radio_value(aspect, ScreenAspect::FourThree, "4:3");
+                });
+                if ui
+                    .add(
+                        egui::Button::new("Fullscreen")
+                            .shortcut_text("F11")
+                            .selected(state.fullscreen),
+                    )
+                    .clicked()
+                {
+                    action = Some(UiAction::ToggleFullscreen);
+                    ui.close();
+                }
+            });
+
             // All action icons live on the far right, away from the config menus.
             // Added right-to-left, so the machine controls (reset, power cycle) sit
             // on the far edge, with a separator keeping them clear of the playback
@@ -228,7 +272,7 @@ pub fn menu_bar(
 
                 ui.separator();
 
-                let (mute_icon, mute_hint) = if muted {
+                let (mute_icon, mute_hint) = if state.muted {
                     ("\u{1F507}", "Unmute (F7)")
                 } else {
                     ("\u{1F50A}", "Mute (F7)")
@@ -254,20 +298,20 @@ pub fn menu_bar(
                 // to the left of the separator. Fast-forward stays highlighted
                 // (`selected`) while active so the icon reflects whether we're
                 // fast-forwarding without needing a second glyph.
-                let ff_hint = if fast_forward {
+                let ff_hint = if state.fast_forward {
                     "Normal Speed (F6)"
                 } else {
                     "Fast Forward 4x (F6)"
                 };
                 if ui
-                    .add(egui::Button::new("\u{23E9}").selected(fast_forward))
+                    .add(egui::Button::new("\u{23E9}").selected(state.fast_forward))
                     .on_hover_text(ff_hint)
                     .clicked()
                 {
                     action = Some(UiAction::ToggleFastForward);
                 }
 
-                let (play_icon, play_hint) = if paused {
+                let (play_icon, play_hint) = if state.paused {
                     ("\u{25B6}", "Resume (F5)")
                 } else {
                     ("\u{23F8}", "Pause (F5)")
