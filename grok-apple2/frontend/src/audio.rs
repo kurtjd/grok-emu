@@ -1,6 +1,7 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use grok_apple2_core::{Apple2, settings};
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// The fully-assembled emulator, parameterized over our cpal audio backend.
@@ -48,6 +49,7 @@ fn build_stream<T>(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
     ring: Arc<Mutex<VecDeque<f32>>>,
+    muted: Arc<AtomicBool>,
 ) -> cpal::Stream
 where
     T: cpal::SizedSample + cpal::FromSample<f32>,
@@ -58,9 +60,12 @@ where
             config,
             move |out: &mut [T], _: &cpal::OutputCallbackInfo| {
                 let mut ring = ring.lock().unwrap();
+                let muted = muted.load(Ordering::Relaxed);
                 for frame in out.chunks_mut(channels) {
-                    // Mono source: replicate the sample across all channels.
-                    let sample = T::from_sample(ring.pop_front().unwrap_or(0.0));
+                    // Drain the ring even when muted so it stays in sync with the
+                    // emulator; just emit silence instead of the popped sample.
+                    let popped = ring.pop_front().unwrap_or(0.0);
+                    let sample = T::from_sample(if muted { 0.0 } else { popped });
                     frame.fill(sample);
                 }
             },
@@ -71,9 +76,12 @@ where
 }
 
 /// Open the default output device and start streaming from the returned
-/// `CpalAudio` sink. The `cpal::Stream` must be kept alive to keep playing.
-pub fn init_audio() -> (CpalAudio, cpal::Stream) {
+/// `CpalAudio` sink. The `cpal::Stream` must be kept alive to keep playing. The
+/// returned `Arc<AtomicBool>` mutes the output when set; it lives in the output
+/// stream (built once) so muting persists across emulator power cycles.
+pub fn init_audio() -> (CpalAudio, cpal::Stream, Arc<AtomicBool>) {
     let ring = Arc::new(Mutex::new(VecDeque::new()));
+    let muted = Arc::new(AtomicBool::new(false));
 
     let host = cpal::default_host();
     let device = host
@@ -93,12 +101,18 @@ pub fn init_audio() -> (CpalAudio, cpal::Stream) {
     };
 
     let stream = match default_cfg.sample_format() {
-        cpal::SampleFormat::F32 => build_stream::<f32>(&device, &config, ring.clone()),
-        cpal::SampleFormat::I16 => build_stream::<i16>(&device, &config, ring.clone()),
-        cpal::SampleFormat::U16 => build_stream::<u16>(&device, &config, ring.clone()),
+        cpal::SampleFormat::F32 => {
+            build_stream::<f32>(&device, &config, ring.clone(), muted.clone())
+        }
+        cpal::SampleFormat::I16 => {
+            build_stream::<i16>(&device, &config, ring.clone(), muted.clone())
+        }
+        cpal::SampleFormat::U16 => {
+            build_stream::<u16>(&device, &config, ring.clone(), muted.clone())
+        }
         other => panic!("unsupported audio sample format: {other:?}"),
     };
     stream.play().expect("failed to start audio stream");
 
-    (CpalAudio { ring }, stream)
+    (CpalAudio { ring }, stream, muted)
 }

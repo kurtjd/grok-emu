@@ -73,7 +73,10 @@ pub enum UiAction {
     Reset,
     /// Cold boot: power the machine off and back on (clears RAM, etc.).
     PowerCycle,
-    Quit,
+    /// Freeze/unfreeze emulation (the display keeps showing the last frame).
+    TogglePause,
+    /// Silence/unsilence the emulated speaker without stopping emulation.
+    ToggleMute,
     /// Insert (or replace) a card of `kind` into `slot`.
     InsertCard {
         slot: usize,
@@ -101,11 +104,14 @@ pub enum UiAction {
 /// `slots` is a read-only snapshot of which card occupies each slot so the menu
 /// can label slots and highlight the active card. `disk_names` holds the name of
 /// the disk image loaded into each slot's Drive 1 (if any), for display.
+/// `paused` and `muted` reflect current state so the toggle buttons can show it.
 pub fn menu_bar(
     ui: &mut egui::Ui,
     slots: &[Option<CardKind>; NUM_SLOTS],
     disk_names: &[Option<String>; NUM_SLOTS],
     serial: &mut SerialConfig,
+    paused: bool,
+    muted: bool,
 ) -> Option<UiAction> {
     let mut action = None;
 
@@ -119,28 +125,6 @@ pub fn menu_bar(
     egui::containers::menu::MenuBar::new()
         .config(config)
         .ui(ui, |ui| {
-            ui.menu_button("Power", |ui| {
-                if ui
-                    .add(egui::Button::new("Reset").shortcut_text("F2"))
-                    .clicked()
-                {
-                    action = Some(UiAction::Reset);
-                    ui.close();
-                }
-                if ui
-                    .add(egui::Button::new("Power Cycle").shortcut_text("F3"))
-                    .clicked()
-                {
-                    action = Some(UiAction::PowerCycle);
-                    ui.close();
-                }
-                ui.separator();
-                if ui.button("Quit").clicked() {
-                    action = Some(UiAction::Quit);
-                    ui.close();
-                }
-            });
-
             ui.menu_button("Slots", |ui| {
                 // Don't wrap long card names; let the menu widen to fit them.
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
@@ -212,6 +196,47 @@ pub fn menu_bar(
                             }
                         }
                     });
+                }
+            });
+
+            // All action icons live on the far right, away from the config menus.
+            // Added right-to-left, so the machine controls (reset, power cycle) sit
+            // on the far edge, with a separator keeping them clear of the playback
+            // toggles (pause, mute) to their left. Labels swap to reflect current
+            // state; the F2/F3/F5/F6 shortcuts are handled host-side in `input`.
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // NOTE: egui bundles its own fonts and only renders glyphs with
+                // emoji presentation. The IEC power symbol (U+23FB) isn't an emoji
+                // and shows as tofu, so use the plug emoji for power cycle instead.
+                if ui
+                    .button("\u{1F50C}")
+                    .on_hover_text("Power Cycle (F3)")
+                    .clicked()
+                {
+                    action = Some(UiAction::PowerCycle);
+                }
+                if ui.button("\u{1F504}").on_hover_text("Reset (F2)").clicked() {
+                    action = Some(UiAction::Reset);
+                }
+
+                ui.separator();
+
+                let (mute_icon, mute_hint) = if muted {
+                    ("\u{1F507}", "Unmute (F6)")
+                } else {
+                    ("\u{1F50A}", "Mute (F6)")
+                };
+                if ui.button(mute_icon).on_hover_text(mute_hint).clicked() {
+                    action = Some(UiAction::ToggleMute);
+                }
+
+                let (play_icon, play_hint) = if paused {
+                    ("\u{25B6}", "Resume (F5)")
+                } else {
+                    ("\u{23F8}", "Pause (F5)")
+                };
+                if ui.button(play_icon).on_hover_text(play_hint).clicked() {
+                    action = Some(UiAction::TogglePause);
                 }
             });
         });

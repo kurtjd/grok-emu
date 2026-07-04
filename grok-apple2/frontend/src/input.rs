@@ -73,21 +73,40 @@ fn key_to_ascii(key: egui::Key) -> Option<u8> {
 /// Skipped while egui itself wants the keyboard (e.g. a focused text field) so
 /// UI typing doesn't leak into the emulated machine.
 ///
-/// Returns `true` if the user pressed the power-cycle shortcut (F3), which the
-/// caller must act on since it rebuilds the whole machine, not just poke it.
-pub fn handle_input(machine: &mut Machine, ctx: &egui::Context) -> bool {
+/// Host-side actions requested via keyboard shortcuts that the app (not the
+/// machine) must carry out. Menu shortcuts stay live even while paused.
+#[derive(Default)]
+pub struct HostRequests {
+    /// F3 — power cycle (rebuilds the whole machine).
+    pub power_cycle: bool,
+    /// F5 — toggle pause.
+    pub toggle_pause: bool,
+    /// F6 — toggle audio mute.
+    pub toggle_mute: bool,
+}
+
+/// Translate this frame's egui keyboard events into emulator input, returning
+/// any host-side shortcuts the caller must act on.
+///
+/// Skipped while egui itself wants the keyboard (e.g. a focused text field) so
+/// UI typing doesn't leak into the emulated machine.
+///
+/// While `paused`, emulated keys are swallowed (not forwarded to the frozen
+/// machine), but the host/menu shortcuts (F2 reset, F3 power cycle, F5 pause,
+/// F6 mute) stay live — otherwise F5 couldn't resume.
+pub fn handle_input(machine: &mut Machine, ctx: &egui::Context, paused: bool) -> HostRequests {
+    let mut requests = HostRequests::default();
     if ctx.egui_wants_keyboard_input() {
-        return false;
+        return requests;
     }
 
-    let mut power_cycle = false;
     let events = ctx.input(|i| i.events.clone());
     for event in events {
         match event {
             // Printable characters, already shift/layout-resolved by egui. This
             // covers letters, digits, and shifted symbols (+, @, :, ?, ...) that
             // egui delivers as distinct logical keys we'd otherwise have to remap.
-            egui::Event::Text(text) => {
+            egui::Event::Text(text) if !paused => {
                 for ch in text.chars() {
                     if ch.is_ascii() {
                         machine.input(ch as u8, false, false);
@@ -101,18 +120,22 @@ pub fn handle_input(machine: &mut Machine, ctx: &egui::Context) -> bool {
                 modifiers,
                 ..
             } => match key {
+                // Host/menu shortcuts stay live regardless of pause state.
                 // F2 is a host-side reset shortcut, not an emulated key.
                 egui::Key::F2 => machine.reset(),
                 // F3 is a host-side power-cycle shortcut, handled by the app.
-                egui::Key::F3 => power_cycle = true,
-                egui::Key::ArrowRight => machine.input_arrow(true),
-                egui::Key::ArrowLeft => machine.input_arrow(false),
-                egui::Key::Escape => machine.input(ESCAPE, false, false),
-                egui::Key::Enter => machine.input(RETURN, false, false),
-                egui::Key::Backspace => machine.input(BACKSPACE, false, false),
+                egui::Key::F3 => requests.power_cycle = true,
+                egui::Key::F5 => requests.toggle_pause = true,
+                egui::Key::F6 => requests.toggle_mute = true,
+                // Emulated keys are only forwarded while running.
+                egui::Key::ArrowRight if !paused => machine.input_arrow(true),
+                egui::Key::ArrowLeft if !paused => machine.input_arrow(false),
+                egui::Key::Escape if !paused => machine.input(ESCAPE, false, false),
+                egui::Key::Enter if !paused => machine.input(RETURN, false, false),
+                egui::Key::Backspace if !paused => machine.input(BACKSPACE, false, false),
                 // Printables come through Event::Text above; here we only forward
                 // Ctrl+key (Text is suppressed while ctrl/cmd is held).
-                _ if modifiers.ctrl => {
+                _ if !paused && modifiers.ctrl => {
                     if let Some(ascii) = key_to_ascii(key) {
                         machine.input(ascii, false, true);
                     }
@@ -122,12 +145,12 @@ pub fn handle_input(machine: &mut Machine, ctx: &egui::Context) -> bool {
             // egui swallows Ctrl+C/X/V into these before emitting a Key event, so
             // translate them back into emulator Ctrl-key presses (Ctrl+C is the
             // BASIC break, so this one actually matters).
-            egui::Event::Copy => machine.input(b'c', false, true),
-            egui::Event::Cut => machine.input(b'x', false, true),
-            egui::Event::Paste(_) => machine.input(b'v', false, true),
+            egui::Event::Copy if !paused => machine.input(b'c', false, true),
+            egui::Event::Cut if !paused => machine.input(b'x', false, true),
+            egui::Event::Paste(_) if !paused => machine.input(b'v', false, true),
             _ => {}
         }
     }
 
-    power_cycle
+    requests
 }
