@@ -79,6 +79,8 @@ pub enum UiAction {
     ToggleFastForward,
     /// Silence/unsilence the emulated speaker without stopping emulation.
     ToggleMute,
+    /// Prompt for a path and save the current screen as a PNG image.
+    Screenshot,
     /// Insert (or replace) a card of `kind` into `slot`.
     InsertCard {
         slot: usize,
@@ -235,10 +237,23 @@ pub fn menu_bar(
                     action = Some(UiAction::ToggleMute);
                 }
 
-                // Sits between the speaker and pause icons. Added here (after mute,
-                // before pause) so the right-to-left layout renders it between them.
-                // Stays highlighted (`selected`) while active so the icon reflects
-                // whether we're fast-forwarding without needing a second glyph.
+                // Camera lives with the speaker in its own group, kept clear of
+                // the playback toggles by a separator. U+1F4F7 has emoji
+                // presentation so it renders in egui's bundled fonts.
+                if ui
+                    .button("\u{1F4F7}")
+                    .on_hover_text("Screenshot (F12)")
+                    .clicked()
+                {
+                    action = Some(UiAction::Screenshot);
+                }
+
+                ui.separator();
+
+                // The playback toggles (fast-forward, pause) form their own group
+                // to the left of the separator. Fast-forward stays highlighted
+                // (`selected`) while active so the icon reflects whether we're
+                // fast-forwarding without needing a second glyph.
                 let ff_hint = if fast_forward {
                     "Normal Speed (F6)"
                 } else {
