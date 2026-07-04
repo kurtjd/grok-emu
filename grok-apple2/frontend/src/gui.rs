@@ -75,6 +75,8 @@ pub enum UiAction {
     PowerCycle,
     /// Freeze/unfreeze emulation (the display keeps showing the last frame).
     TogglePause,
+    /// Toggle 4x fast-forward emulation.
+    ToggleFastForward,
     /// Silence/unsilence the emulated speaker without stopping emulation.
     ToggleMute,
     /// Insert (or replace) a card of `kind` into `slot`.
@@ -105,12 +107,14 @@ pub enum UiAction {
 /// can label slots and highlight the active card. `disk_names` holds the name of
 /// the disk image loaded into each slot's Drive 1 (if any), for display.
 /// `paused` and `muted` reflect current state so the toggle buttons can show it.
+/// `fast_forward` likewise reflects whether 4x emulation is active.
 pub fn menu_bar(
     ui: &mut egui::Ui,
     slots: &[Option<CardKind>; NUM_SLOTS],
     disk_names: &[Option<String>; NUM_SLOTS],
     serial: &mut SerialConfig,
     paused: bool,
+    fast_forward: bool,
     muted: bool,
 ) -> Option<UiAction> {
     let mut action = None;
@@ -202,8 +206,9 @@ pub fn menu_bar(
             // All action icons live on the far right, away from the config menus.
             // Added right-to-left, so the machine controls (reset, power cycle) sit
             // on the far edge, with a separator keeping them clear of the playback
-            // toggles (pause, mute) to their left. Labels swap to reflect current
-            // state; the F2/F3/F5/F6 shortcuts are handled host-side in `input`.
+            // toggles (pause, fast-forward, mute) to their left. Labels swap to
+            // reflect current state; the F2/F3/F5/F6/F7 shortcuts are handled
+            // host-side in `input`.
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 // NOTE: egui bundles its own fonts and only renders glyphs with
                 // emoji presentation. The IEC power symbol (U+23FB) isn't an emoji
@@ -222,12 +227,29 @@ pub fn menu_bar(
                 ui.separator();
 
                 let (mute_icon, mute_hint) = if muted {
-                    ("\u{1F507}", "Unmute (F6)")
+                    ("\u{1F507}", "Unmute (F7)")
                 } else {
-                    ("\u{1F50A}", "Mute (F6)")
+                    ("\u{1F50A}", "Mute (F7)")
                 };
                 if ui.button(mute_icon).on_hover_text(mute_hint).clicked() {
                     action = Some(UiAction::ToggleMute);
+                }
+
+                // Sits between the speaker and pause icons. Added here (after mute,
+                // before pause) so the right-to-left layout renders it between them.
+                // Stays highlighted (`selected`) while active so the icon reflects
+                // whether we're fast-forwarding without needing a second glyph.
+                let ff_hint = if fast_forward {
+                    "Normal Speed (F6)"
+                } else {
+                    "Fast Forward 4x (F6)"
+                };
+                if ui
+                    .add(egui::Button::new("\u{23E9}").selected(fast_forward))
+                    .on_hover_text(ff_hint)
+                    .clicked()
+                {
+                    action = Some(UiAction::ToggleFastForward);
                 }
 
                 let (play_icon, play_hint) = if paused {
