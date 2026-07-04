@@ -25,6 +25,14 @@ const FRAME_TIME: Duration = Duration::from_nanos(1_000_000_000 / FRAME_RATE);
 // run per displayed frame, and the audio sink's sample stride (see `CpalAudio`).
 const FAST_FORWARD_FACTOR: u32 = 4;
 
+// Fullscreen overlay timing. The floating toolbar reveals on mouse movement and
+// auto-hides after `FS_REVEAL_SECS` of stillness, fading over `FS_FADE_SECS`. The
+// "how to exit" hint holds for `FS_TOAST_HOLD` then fades over `FS_TOAST_FADE`.
+const FS_REVEAL_SECS: f32 = 2.0;
+const FS_FADE_SECS: f32 = 0.25;
+const FS_TOAST_HOLD: f32 = 2.5;
+const FS_TOAST_FADE: f32 = 0.6;
+
 pub struct App {
     apple2: Machine,
     display: Display,
@@ -59,6 +67,10 @@ pub struct App {
     paused: bool,
     // How the emulated display is fitted to the window (square pixels vs 4:3).
     aspect: ScreenAspect,
+    // Fullscreen overlay bookkeeping: whether we were fullscreen last frame (to
+    // detect entering it) and when we entered (to time the hint toast).
+    was_fullscreen: bool,
+    fullscreen_entered_at: Option<Instant>,
     // Held to keep the audio stream alive for the lifetime of the app.
     _audio_stream: cpal::Stream,
 }
@@ -95,6 +107,8 @@ impl App {
             speed,
             paused: false,
             aspect: ScreenAspect::default(),
+            was_fullscreen: false,
+            fullscreen_entered_at: None,
             _audio_stream: audio_stream,
         }
     }
@@ -142,6 +156,150 @@ impl App {
         {
             self.display.save_png(&path);
         }
+    }
+
+    /// Render the toolbar contents (menu bar + action buttons) into `ui`, returning
+    /// the action the user triggered. Shared by the docked (windowed) toolbar and
+    /// the floating fullscreen overlay.
+    fn toolbar_ui(&mut self, ui: &mut egui::Ui, fullscreen: bool) -> Option<UiAction> {
+        gui::menu_bar(
+            ui,
+            &self.slots,
+            &self.disk_names,
+            &mut self.serial,
+            &mut self.aspect,
+            gui::ToolbarState {
+                paused: self.paused,
+                fast_forward: self.speed.load(Ordering::Relaxed) != 1,
+                muted: self.audio_muted.load(Ordering::Relaxed),
+                fullscreen,
+            },
+        )
+    }
+
+    /// Execute a toolbar action. `fullscreen` is the current window state, used to
+    /// flip it on a fullscreen toggle.
+    fn apply_action(&mut self, action: UiAction, ctx: &egui::Context, fullscreen: bool) {
+        match action {
+            UiAction::Reset => self.apple2.reset(),
+            UiAction::PowerCycle => self.power_cycle(),
+            UiAction::TogglePause => self.set_paused(!self.paused),
+            UiAction::ToggleFastForward => self.toggle_fast_forward(),
+            UiAction::ToggleFullscreen => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
+            }
+            UiAction::ToggleMute => {
+                self.audio_muted.fetch_xor(true, Ordering::Relaxed);
+            }
+            UiAction::Screenshot => self.save_screenshot(),
+            UiAction::InsertCard { slot, kind } => {
+                self.apple2
+                    .insert_peripheral(build_card(kind, &self.serial), slot);
+                self.slots[slot] = Some(kind);
+                self.disk_names[slot] = None;
+                self.disk_images[slot] = None;
+            }
+            UiAction::ReconfigureSerial { slot } => {
+                // Config was already updated in place by the menu; tear down and
+                // rebuild the card so the change takes effect.
+                self.apple2.remove_peripheral(slot);
+                self.apple2
+                    .insert_peripheral(build_serial(&self.serial), slot);
+            }
+            UiAction::RemoveCard { slot } => {
+                self.apple2.remove_peripheral(slot);
+                self.slots[slot] = None;
+                self.disk_names[slot] = None;
+                self.disk_images[slot] = None;
+            }
+            UiAction::LoadDisk { slot } => {
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("Disk image", &["woz", "dsk", "po"])
+                    .pick_file()
+                    && let Some(disk) = read_disk(&path)
+                    && let Some(card) = self.apple2.peripheral_mut::<disk::ControllerCard>(slot)
+                {
+                    insert_disk_bytes(card, &disk.data, disk.format);
+                    self.disk_names[slot] =
+                        path.file_name().map(|n| n.to_string_lossy().into_owned());
+                    self.disk_images[slot] = Some(disk);
+                }
+            }
+        }
+    }
+
+    /// Render the fullscreen toolbar as a floating overlay that fades in on mouse
+    /// activity and auto-hides (with the OS cursor) after a short idle, so it never
+    /// reflows the display the way a docked panel would.
+    fn fullscreen_overlay(&mut self, ctx: &egui::Context) {
+        let idle = ctx.input(|i| i.pointer.time_since_last_movement());
+        let show = idle < FS_REVEAL_SECS;
+        let alpha =
+            ctx.animate_bool_with_time(egui::Id::new("fs_toolbar_fade"), show, FS_FADE_SECS);
+
+        if alpha > 0.0 {
+            let width = ctx.content_rect().width();
+            let action = egui::Area::new(egui::Id::new("fs_toolbar"))
+                .order(egui::Order::Foreground)
+                .fixed_pos(egui::pos2(0.0, 0.0))
+                .show(ctx, |ui| {
+                    ui.set_opacity(alpha);
+                    egui::Frame::new()
+                        .fill(egui::Color32::from_black_alpha(200))
+                        .inner_margin(egui::Margin::symmetric(6, 4))
+                        .show(ui, |ui| {
+                            ui.set_width(width - 12.0);
+                            self.toolbar_ui(ui, true)
+                        })
+                        .inner
+                })
+                .inner;
+            if let Some(action) = action {
+                self.apply_action(action, ctx, true);
+            }
+        } else {
+            // Fully idle: hide the cursor for a clean, immersive picture.
+            ctx.set_cursor_icon(egui::CursorIcon::None);
+        }
+
+        self.fullscreen_hint(ctx);
+    }
+
+    /// Show a fading "how to get out" hint for a moment after entering fullscreen,
+    /// then forget it.
+    fn fullscreen_hint(&mut self, ctx: &egui::Context) {
+        let Some(entered) = self.fullscreen_entered_at else {
+            return;
+        };
+        let elapsed = entered.elapsed().as_secs_f32();
+        let alpha = if elapsed < FS_TOAST_HOLD {
+            1.0
+        } else {
+            (1.0 - (elapsed - FS_TOAST_HOLD) / FS_TOAST_FADE).clamp(0.0, 1.0)
+        };
+        if alpha <= 0.0 {
+            self.fullscreen_entered_at = None;
+            return;
+        }
+
+        egui::Area::new(egui::Id::new("fs_hint"))
+            .order(egui::Order::Foreground)
+            .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 48.0))
+            .show(ctx, |ui| {
+                ui.set_opacity(alpha);
+                egui::Frame::new()
+                    .fill(egui::Color32::from_black_alpha(200))
+                    .corner_radius(egui::CornerRadius::same(6))
+                    .inner_margin(egui::Margin::symmetric(12, 8))
+                    .show(ui, |ui| {
+                        ui.label(
+                            egui::RichText::new(
+                                "Move mouse to top for menu   \u{2022}   F11 to exit",
+                            )
+                            .color(egui::Color32::WHITE),
+                        );
+                    });
+            });
     }
 }
 
@@ -244,6 +402,16 @@ fn insert_disk_bytes(card: &mut disk::ControllerCard, data: &[u8], format: DiskF
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        // Current fullscreen state from the windowing system, so the toggle and
+        // its menu checkmark stay in sync with reality rather than a tracked flag.
+        let fullscreen = ctx.input(|i| i.viewport().fullscreen).unwrap_or(false);
+        // Detect entering fullscreen (to time the hint toast); clear it on exit.
+        if fullscreen && !self.was_fullscreen {
+            self.fullscreen_entered_at = Some(Instant::now());
+        } else if !fullscreen {
+            self.fullscreen_entered_at = None;
+        }
+        self.was_fullscreen = fullscreen;
 
         // Host-side keyboard shortcuts (power cycle, pause, mute) can't be
         // handled inside `handle_input` since they touch the whole app, not just
@@ -264,6 +432,9 @@ impl eframe::App for App {
         }
         if requests.take_screenshot {
             self.save_screenshot();
+        }
+        if requests.toggle_fullscreen {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(!fullscreen));
         }
 
         // Advance the emulation at a fixed 60 Hz regardless of how often eframe
@@ -290,65 +461,16 @@ impl eframe::App for App {
             }
         }
 
-        egui::Panel::top("toolbar").show(ui, |ui| {
-            if let Some(action) = gui::menu_bar(
-                ui,
-                &self.slots,
-                &self.disk_names,
-                &mut self.serial,
-                &mut self.aspect,
-                gui::ToolbarState {
-                    paused: self.paused,
-                    fast_forward: self.speed.load(Ordering::Relaxed) != 1,
-                    muted: self.audio_muted.load(Ordering::Relaxed),
-                },
-            ) {
-                match action {
-                    UiAction::Reset => self.apple2.reset(),
-                    UiAction::PowerCycle => self.power_cycle(),
-                    UiAction::TogglePause => self.set_paused(!self.paused),
-                    UiAction::ToggleFastForward => self.toggle_fast_forward(),
-                    UiAction::ToggleMute => {
-                        self.audio_muted.fetch_xor(true, Ordering::Relaxed);
-                    }
-                    UiAction::Screenshot => self.save_screenshot(),
-                    UiAction::InsertCard { slot, kind } => {
-                        self.apple2
-                            .insert_peripheral(build_card(kind, &self.serial), slot);
-                        self.slots[slot] = Some(kind);
-                        self.disk_names[slot] = None;
-                        self.disk_images[slot] = None;
-                    }
-                    UiAction::ReconfigureSerial { slot } => {
-                        // Config was already updated in place by the menu; tear
-                        // down and rebuild the card so the change takes effect.
-                        self.apple2.remove_peripheral(slot);
-                        self.apple2
-                            .insert_peripheral(build_serial(&self.serial), slot);
-                    }
-                    UiAction::RemoveCard { slot } => {
-                        self.apple2.remove_peripheral(slot);
-                        self.slots[slot] = None;
-                        self.disk_names[slot] = None;
-                        self.disk_images[slot] = None;
-                    }
-                    UiAction::LoadDisk { slot } => {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .add_filter("Disk image", &["woz", "dsk", "po"])
-                            .pick_file()
-                            && let Some(disk) = read_disk(&path)
-                            && let Some(card) =
-                                self.apple2.peripheral_mut::<disk::ControllerCard>(slot)
-                        {
-                            insert_disk_bytes(card, &disk.data, disk.format);
-                            self.disk_names[slot] =
-                                path.file_name().map(|n| n.to_string_lossy().into_owned());
-                            self.disk_images[slot] = Some(disk);
-                        }
-                    }
-                }
+        if fullscreen {
+            self.fullscreen_overlay(&ctx);
+        } else {
+            let action = egui::Panel::top("toolbar")
+                .show(ui, |ui| self.toolbar_ui(ui, fullscreen))
+                .inner;
+            if let Some(action) = action {
+                self.apply_action(action, &ctx, fullscreen);
             }
-        });
+        }
 
         // Apply the chosen aspect/filtering. Cheap when unchanged, and re-renders
         // the buffered frame on change so it updates instantly even while paused.
@@ -364,6 +486,16 @@ impl eframe::App for App {
         if !self.paused {
             let wait = self.next_frame.saturating_duration_since(Instant::now());
             ctx.request_repaint_after(wait);
+        }
+
+        // In fullscreen, keep repainting while the overlay could still be animating
+        // toward hidden (or the hint is up), so the auto-hide and cursor-hide fire
+        // even when emulation is paused.
+        if fullscreen {
+            let idle = ctx.input(|i| i.pointer.time_since_last_movement());
+            if idle < FS_REVEAL_SECS + FS_FADE_SECS + 0.1 || self.fullscreen_entered_at.is_some() {
+                ctx.request_repaint();
+            }
         }
     }
 }

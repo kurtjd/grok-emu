@@ -91,6 +91,8 @@ pub enum UiAction {
     ToggleMute,
     /// Prompt for a path and save the current screen as a PNG image.
     Screenshot,
+    /// Toggle borderless fullscreen.
+    ToggleFullscreen,
     /// Insert (or replace) a card of `kind` into `slot`.
     InsertCard {
         slot: usize,
@@ -120,6 +122,8 @@ pub struct ToolbarState {
     pub fast_forward: bool,
     /// Audio output is muted.
     pub muted: bool,
+    /// The window is currently fullscreen.
+    pub fullscreen: bool,
 }
 
 /// Render the top toolbar. Returns the action the user triggered, if any.
@@ -232,6 +236,17 @@ pub fn menu_bar(
                     ui.radio_value(aspect, ScreenAspect::Square, "Square");
                     ui.radio_value(aspect, ScreenAspect::FourThree, "4:3");
                 });
+                if ui
+                    .add(
+                        egui::Button::new("Fullscreen")
+                            .shortcut_text("F11")
+                            .selected(state.fullscreen),
+                    )
+                    .clicked()
+                {
+                    action = Some(UiAction::ToggleFullscreen);
+                    ui.close();
+                }
             });
 
             // All action icons live on the far right, away from the config menus.
