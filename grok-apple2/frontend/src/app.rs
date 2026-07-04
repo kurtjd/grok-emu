@@ -1,5 +1,5 @@
 use crate::audio::{self, CpalAudio, Machine};
-use crate::gui::{self, CardKind, SerialConfig, SerialPortSource, UiAction};
+use crate::gui::{self, CardKind, ScreenAspect, SerialConfig, SerialPortSource, UiAction};
 use crate::input;
 use crate::serial::StdSerialPort;
 use crate::video::Display;
@@ -57,6 +57,8 @@ pub struct App {
     // When true, emulation is frozen: `run_frame` is skipped so the display holds
     // the last frame and the audio ring drains to silence.
     paused: bool,
+    // How the emulated display is fitted to the window (square pixels vs 4:3).
+    aspect: ScreenAspect,
     // Held to keep the audio stream alive for the lifetime of the app.
     _audio_stream: cpal::Stream,
 }
@@ -92,6 +94,7 @@ impl App {
             audio_muted,
             speed,
             paused: false,
+            aspect: ScreenAspect::default(),
             _audio_stream: audio_stream,
         }
     }
@@ -293,9 +296,12 @@ impl eframe::App for App {
                 &self.slots,
                 &self.disk_names,
                 &mut self.serial,
-                self.paused,
-                self.speed.load(Ordering::Relaxed) != 1,
-                self.audio_muted.load(Ordering::Relaxed),
+                &mut self.aspect,
+                gui::ToolbarState {
+                    paused: self.paused,
+                    fast_forward: self.speed.load(Ordering::Relaxed) != 1,
+                    muted: self.audio_muted.load(Ordering::Relaxed),
+                },
             ) {
                 match action {
                     UiAction::Reset => self.apple2.reset(),
@@ -343,6 +349,11 @@ impl eframe::App for App {
                 }
             }
         });
+
+        // Apply the chosen aspect/filtering. Cheap when unchanged, and re-renders
+        // the buffered frame on change so it updates instantly even while paused.
+        self.display.set_aspect(self.aspect);
+
         egui::CentralPanel::default().show(ui, |ui| {
             self.display.draw(ui);
         });
