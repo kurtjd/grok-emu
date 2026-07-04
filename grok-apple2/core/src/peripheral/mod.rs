@@ -5,6 +5,17 @@ pub mod serial;
 use crate::mem_map;
 use grok_6502::bus::Bus;
 
+// Owning the peripheral is more ergonomic, but this requires
+// boxing since it is a trait object. So in no_std,
+// fall back to borrowing which is less ergonomic but
+// necessary to avoid heap allocation.
+
+/// Handle to a peripheral card.
+#[cfg(feature = "std")]
+pub type PeripheralHandle<'a> = Box<dyn Peripheral + 'a>;
+#[cfg(not(feature = "std"))]
+pub type PeripheralHandle<'a> = &'a mut dyn Peripheral;
+
 const NUM_SLOTS: usize = 8;
 
 /// Shared pins between all peripherals and the motherboard.
@@ -34,8 +45,7 @@ impl Pins {
 
 pub(crate) struct Peripherals<'a> {
     pub(crate) pins: Pins,
-    // Chose to own references instead of boxing it up to keep this no_std compatible
-    pub(crate) slots: [Option<&'a mut dyn Peripheral>; NUM_SLOTS],
+    pub(crate) slots: [Option<PeripheralHandle<'a>>; NUM_SLOTS],
     active_slot: usize,
 }
 
@@ -81,11 +91,13 @@ impl Peripherals<'_> {
         match bus.addr() {
             mem_map::DEVICE_SELECT..mem_map::IO_SELECT => self.device_select(bus),
             mem_map::IO_SELECT..mem_map::IO_STROBE => self.io_select(bus),
-            mem_map::IO_STROBE.. if let Some(peripheral) = &mut self.slots[self.active_slot] => {
-                // Note: Not checking for the magic value of $CFFF because we are not leaving it
-                // up to each peripheral to decide if it will respond to IO strobe or not
-                // (though on real hardware a card could misbehave and cause conflicts)
-                peripheral.io_strobe(bus, &mut self.pins);
+            mem_map::IO_STROBE.. => {
+                if let Some(peripheral) = &mut self.slots[self.active_slot] {
+                    // Note: Not checking for the magic value of $CFFF because we are not leaving it
+                    // up to each peripheral to decide if it will respond to IO strobe or not
+                    // (though on real hardware a card could misbehave and cause conflicts)
+                    peripheral.io_strobe(bus, &mut self.pins);
+                }
             }
             _ => unreachable!(),
         }
@@ -95,7 +107,8 @@ impl Peripherals<'_> {
 /// Interface for various Apple II peripheral cards that aren't built directly into the motherboard.
 ///
 /// This can be used to emulate a wide range of peripherals.
-pub trait Peripheral {
+#[allow(private_bounds)]
+pub trait Peripheral: AsAny {
     /// Called every CPU cycle, regardless of whether the peripheral is selected or not.
     ///
     /// Useful for updating internal state on a consistent basis.
@@ -114,4 +127,28 @@ pub trait Peripheral {
     ///
     /// This allows the peripheral to make use of the extended ROM range.
     fn io_strobe(&mut self, bus: &mut dyn Bus, pins: &mut Pins);
+}
+
+// This allows user/frontend to downcast the peripheral back into a concrete type.
+//
+// Yeah, downcasting might be considered a code smell, but I consider it valid for this case
+// since the core needs to own/hold mutable references to a heterogeneous collection of peripherals
+// for calling the `Peripheral` trait methods, but the user might still need to dynamically
+// call concrete methods on a specific peripheral (such as inserting a disk into the disk drive).
+//
+// Considered maybe a message passing interface or something, but doesn't really buy us anything
+// over simple downcasting.
+pub(crate) trait AsAny {
+    fn as_any(&self) -> &dyn core::any::Any;
+    fn as_any_mut(&mut self) -> &mut dyn core::any::Any;
+}
+
+impl<T: 'static> AsAny for T {
+    fn as_any_mut(&mut self) -> &mut dyn core::any::Any {
+        self
+    }
+
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
 }

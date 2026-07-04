@@ -531,7 +531,7 @@ impl<S: SerialPort> SuperSerial<S> {
     }
 }
 
-impl<S: SerialPort> Peripheral for SuperSerial<S> {
+impl<S: SerialPort + 'static> Peripheral for SuperSerial<S> {
     fn tick(&mut self, bus: &mut dyn Bus, _pins: &mut super::Pins) {
         if bus.res() {
             self.acia.hard_reset();

@@ -8,3 +8,6 @@ repository.workspace = true
 [dependencies]
 bitfield-struct = "0.13.0"
 grok-6502 = { path = "../../grok-6502" }
+
+[features]
+std = []

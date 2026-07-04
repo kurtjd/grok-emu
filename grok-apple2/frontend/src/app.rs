@@ -1,5 +1,5 @@
-use crate::audio::{self, Machine};
-use crate::gui::{self, UiAction};
+use crate::audio::{self, CpalAudio, Machine};
+use crate::gui::{self, CardKind, SerialConfig, SerialPortSource, UiAction};
 use crate::input;
 use crate::serial::StdSerialPort;
 use crate::video::Display;
@@ -24,66 +24,164 @@ pub struct App {
     apple2: Machine,
     display: Display,
     next_frame: Instant,
+    // Frontend-side mirror of which card occupies each slot, used to label the
+    // Cards menu and highlight the active card. The core has no "what kind?"
+    // query, so the frontend tracks it here as the source of truth.
+    slots: [Option<CardKind>; 8],
+    // Name of the disk image loaded into each slot's Drive 1 (if any), shown in
+    // the menu. Cleared when the slot's card is removed or replaced.
+    disk_names: [Option<String>; 8],
+    // Raw disk image bytes (and format) currently loaded into each slot, kept so
+    // a power cycle can re-insert the same disk into a freshly built card. On
+    // real hardware the floppy stays in the drive across a power cycle.
+    disk_images: [Option<StoredDisk>; 8],
+    // User-editable Super Serial Card settings (port source + DIP switches),
+    // applied whenever an SSC is built.
+    serial: SerialConfig,
+    // A handle to the audio ring buffer shared with the live output stream, used
+    // to build a fresh sink for the emulator when it's rebuilt on a power cycle.
+    audio_ring: std::sync::Arc<std::sync::Mutex<std::collections::VecDeque<f32>>>,
     // Held to keep the audio stream alive for the lifetime of the app.
     _audio_stream: cpal::Stream,
 }
 
 impl App {
-    pub fn new(cc: &eframe::CreationContext<'_>, disk_path: Option<String>) -> Self {
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let (audio, audio_stream) = audio::init_audio();
+        // Keep a handle to the ring so a power cycle can build a new sink for the
+        // still-running output stream rather than restarting the audio device.
+        let audio_ring = audio.ring();
 
-        // Peripherals are borrowed by the emulator for its whole lifetime, so we
-        // leak them to obtain 'static references and avoid a self-referential App.
-        let language_card: &'static mut _ = Box::leak(Box::new(language::LanguageCard::new()));
+        // Default layout: Language Card in slot 0, Disk II controller in slot 6.
+        let mut slots = [None; 8];
+        slots[0] = Some(CardKind::LanguageCard);
+        slots[6] = Some(CardKind::DiskController);
 
-        // Setup for ADTPro
-        let sw1 = 0b1111001;
-        let sw2 = 0b0011011;
-        let serial_card: &'static mut _ = Box::leak(Box::new(SuperSerial::new(
-            StdSerialPort::new(),
-            SSC_ROM,
-            sw1,
-            sw2,
-        )));
+        // Disks are inserted at runtime through the Slots menu.
+        let disk_names: [Option<String>; 8] = std::array::from_fn(|_| None);
+        let disk_images: [Option<StoredDisk>; 8] = std::array::from_fn(|_| None);
 
-        let disk_card: &'static mut _ = Box::leak(Box::new(disk::ControllerCard::new(
-            DISK2_ROM,
-            settings::CPU_CLK_SPEED as usize,
-        )));
-
-        // Insert disk if one was passed on the command line.
-        if let Some(path) = disk_path {
-            insert_disk(disk_card, &path);
-        }
-
-        let mut apple2 = Apple2::new(FW_ROM, CHAR_ROM, audio);
-        apple2.insert_peripheral(language_card as &mut dyn Peripheral, 0);
-        apple2.insert_peripheral(serial_card as &mut dyn Peripheral, 2);
-        apple2.insert_peripheral(disk_card as &mut dyn Peripheral, 6);
-        apple2.init();
+        let serial = SerialConfig::default();
+        let apple2 = build_machine(audio, &slots, &serial, &disk_images);
 
         App {
             apple2,
             display: Display::new(&cc.egui_ctx),
             next_frame: Instant::now(),
+            slots,
+            disk_names,
+            disk_images,
+            serial,
+            audio_ring,
             _audio_stream: audio_stream,
         }
     }
+
+    /// Simulate turning the Apple II off and back on: tear down the running
+    /// machine and build a brand-new one, giving cleared RAM, reset soft
+    /// switches, reset peripheral state, and a fresh CPU. Inserted disks are
+    /// re-inserted (the floppy stays in the drive across a power cycle); the
+    /// audio stream is reattached via the shared ring buffer.
+    fn power_cycle(&mut self) {
+        let audio = CpalAudio::new(self.audio_ring.clone());
+        self.apple2 = build_machine(audio, &self.slots, &self.serial, &self.disk_images);
+        self.next_frame = Instant::now();
+    }
 }
 
-/// Read a disk image from `path` and load it into the controller, dispatching on
-/// the file extension. Panics on an unreadable file or unknown format.
-fn insert_disk(card: &mut disk::ControllerCard, path: &str) {
-    let buffer = std::fs::read(path).expect("failed to read disk image");
-    let ext = std::path::Path::new(path)
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
-    match ext {
-        "woz" => card.insert_woz(&buffer),
-        "dsk" => card.insert_dsk(&buffer),
-        "po" => card.insert_po(&buffer),
-        _ => panic!("Unsupported disk format: .{ext}"),
+/// The format of a disk image, tracked so a cached image can be re-inserted into
+/// a freshly built controller without re-reading or re-sniffing the file.
+#[derive(Clone, Copy)]
+enum DiskFormat {
+    Woz,
+    Dsk,
+    Po,
+}
+
+/// A disk image the frontend has loaded, retained so a power cycle can put the
+/// same disk back into the rebuilt controller.
+struct StoredDisk {
+    format: DiskFormat,
+    data: Vec<u8>,
+}
+
+/// Build a fresh emulator from the current slot/serial/disk configuration. Used
+/// both at startup and on every power cycle.
+fn build_machine(
+    audio: CpalAudio,
+    slots: &[Option<CardKind>; 8],
+    serial: &SerialConfig,
+    disk_images: &[Option<StoredDisk>; 8],
+) -> Machine {
+    let mut apple2 = Apple2::new(FW_ROM, CHAR_ROM, audio);
+    for (slot, kind) in slots.iter().enumerate() {
+        let Some(kind) = *kind else { continue };
+        apple2.insert_peripheral(build_card(kind, serial), slot);
+        // Re-insert any cached disk image into the freshly built controller.
+        if let Some(image) = &disk_images[slot]
+            && let Some(card) = apple2.peripheral_mut::<disk::ControllerCard>(slot)
+        {
+            insert_disk_bytes(card, &image.data, image.format);
+        }
+    }
+    apple2.init();
+    apple2
+}
+
+/// Construct a fresh peripheral card of `kind`, running any real-world setup the
+/// card needs (e.g. the Super Serial Card spins up a PTY).
+fn build_card(kind: CardKind, serial: &SerialConfig) -> Box<dyn Peripheral> {
+    match kind {
+        CardKind::LanguageCard => Box::new(language::LanguageCard::new()),
+        CardKind::Serial => build_serial(serial),
+        CardKind::DiskController => Box::new(disk::ControllerCard::new(
+            DISK2_ROM,
+            settings::CPU_CLK_SPEED as usize,
+        )),
+    }
+}
+
+/// Build a Super Serial Card from the user's current configuration, opening the
+/// requested host-side port and applying the DIP switch settings.
+fn build_serial(serial: &SerialConfig) -> Box<dyn Peripheral> {
+    let port = match &serial.source {
+        SerialPortSource::Pty => StdSerialPort::pty(),
+        SerialPortSource::Path(path) => StdSerialPort::open(path),
+    };
+    Box::new(SuperSerial::new(port, SSC_ROM, serial.sw1, serial.sw2))
+}
+
+/// Read a disk image from `path`, sniffing the format from the file extension.
+/// Logs and returns `None` on an unreadable file or unknown format rather than
+/// crashing the emulator. The returned image is cached by the caller so it can
+/// survive a power cycle.
+fn read_disk(path: &std::path::Path) -> Option<StoredDisk> {
+    let data = match std::fs::read(path) {
+        Ok(data) => data,
+        Err(e) => {
+            eprintln!("Failed to read disk image {}: {e}", path.display());
+            return None;
+        }
+    };
+    let format = match path.extension().and_then(|e| e.to_str()) {
+        Some("woz") => DiskFormat::Woz,
+        Some("dsk") => DiskFormat::Dsk,
+        Some("po") => DiskFormat::Po,
+        other => {
+            eprintln!("Unsupported disk format: {other:?}");
+            return None;
+        }
+    };
+    Some(StoredDisk { format, data })
+}
+
+/// Insert already-read disk bytes into the controller, dispatching on the cached
+/// format.
+fn insert_disk_bytes(card: &mut disk::ControllerCard, data: &[u8], format: DiskFormat) {
+    match format {
+        DiskFormat::Woz => card.insert_woz(data),
+        DiskFormat::Dsk => card.insert_dsk(data),
+        DiskFormat::Po => card.insert_po(data),
     }
 }
 
@@ -91,7 +189,11 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
 
-        input::handle_input(&mut self.apple2, &ctx);
+        // The F3 shortcut can't be handled inside `handle_input` (it only sees
+        // the machine, not the whole app), so it bubbles up as a request here.
+        if input::handle_input(&mut self.apple2, &ctx) {
+            self.power_cycle();
+        }
 
         // Advance the emulation at a fixed 60 Hz regardless of how often eframe
         // repaints (input events can trigger extra repaints).
@@ -108,10 +210,46 @@ impl eframe::App for App {
         }
 
         egui::Panel::top("toolbar").show(ui, |ui| {
-            if let Some(action) = gui::menu_bar(ui) {
+            if let Some(action) = gui::menu_bar(ui, &self.slots, &self.disk_names, &mut self.serial)
+            {
                 match action {
                     UiAction::Reset => self.apple2.reset(),
+                    UiAction::PowerCycle => self.power_cycle(),
                     UiAction::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+                    UiAction::InsertCard { slot, kind } => {
+                        self.apple2
+                            .insert_peripheral(build_card(kind, &self.serial), slot);
+                        self.slots[slot] = Some(kind);
+                        self.disk_names[slot] = None;
+                        self.disk_images[slot] = None;
+                    }
+                    UiAction::ReconfigureSerial { slot } => {
+                        // Config was already updated in place by the menu; tear
+                        // down and rebuild the card so the change takes effect.
+                        self.apple2.remove_peripheral(slot);
+                        self.apple2
+                            .insert_peripheral(build_serial(&self.serial), slot);
+                    }
+                    UiAction::RemoveCard { slot } => {
+                        self.apple2.remove_peripheral(slot);
+                        self.slots[slot] = None;
+                        self.disk_names[slot] = None;
+                        self.disk_images[slot] = None;
+                    }
+                    UiAction::LoadDisk { slot } => {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .add_filter("Disk image", &["woz", "dsk", "po"])
+                            .pick_file()
+                            && let Some(disk) = read_disk(&path)
+                            && let Some(card) =
+                                self.apple2.peripheral_mut::<disk::ControllerCard>(slot)
+                        {
+                            insert_disk_bytes(card, &disk.data, disk.format);
+                            self.disk_names[slot] =
+                                path.file_name().map(|n| n.to_string_lossy().into_owned());
+                            self.disk_images[slot] = Some(disk);
+                        }
+                    }
                 }
             }
         });

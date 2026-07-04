@@ -48,7 +48,7 @@ use io::keyboard::Keyboard;
 use io::speaker::Speaker;
 use io::video::{self, CHAR_ROM_SIZE, Video};
 use memory::{ROM_SIZE, Ram, Rom};
-use peripheral::{Peripheral, Peripherals};
+use peripheral::{Peripheral, PeripheralHandle, Peripherals};
 
 pub struct Apple2<'a, A: Audio> {
     bus: SimpleBus,
@@ -148,12 +148,26 @@ impl<'a, A: Audio> Apple2<'a, A> {
         self.io.keyboard.input_arrow(right);
     }
 
-    pub fn insert_peripheral(&mut self, peripheral: &'a mut dyn Peripheral, slotno: usize) {
-        assert!(
-            slotno < self.peripherals.slots.len(),
-            "Slot number must be between 0 and 7"
-        );
+    pub fn insert_peripheral(&mut self, peripheral: PeripheralHandle<'a>, slotno: usize) {
         self.peripherals.slots[slotno] = Some(peripheral);
+    }
+
+    pub fn remove_peripheral(&mut self, slotno: usize) {
+        self.peripherals.slots[slotno] = None;
+    }
+
+    pub fn peripheral_mut<T: Peripheral + 'static>(&mut self, slotno: usize) -> Option<&mut T> {
+        self.peripherals.slots[slotno]
+            .as_deref_mut()?
+            .as_any_mut()
+            .downcast_mut::<T>()
+    }
+
+    pub fn peripheral_ref<T: Peripheral + 'static>(&self, slotno: usize) -> Option<&T> {
+        self.peripherals.slots[slotno]
+            .as_deref()?
+            .as_any()
+            .downcast_ref::<T>()
     }
 
     fn decode(&mut self) {

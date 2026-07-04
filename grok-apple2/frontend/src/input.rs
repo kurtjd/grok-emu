@@ -72,11 +72,15 @@ fn key_to_ascii(key: egui::Key) -> Option<u8> {
 ///
 /// Skipped while egui itself wants the keyboard (e.g. a focused text field) so
 /// UI typing doesn't leak into the emulated machine.
-pub fn handle_input(machine: &mut Machine, ctx: &egui::Context) {
+///
+/// Returns `true` if the user pressed the power-cycle shortcut (F3), which the
+/// caller must act on since it rebuilds the whole machine, not just poke it.
+pub fn handle_input(machine: &mut Machine, ctx: &egui::Context) -> bool {
     if ctx.egui_wants_keyboard_input() {
-        return;
+        return false;
     }
 
+    let mut power_cycle = false;
     let events = ctx.input(|i| i.events.clone());
     for event in events {
         match event {
@@ -99,6 +103,8 @@ pub fn handle_input(machine: &mut Machine, ctx: &egui::Context) {
             } => match key {
                 // F2 is a host-side reset shortcut, not an emulated key.
                 egui::Key::F2 => machine.reset(),
+                // F3 is a host-side power-cycle shortcut, handled by the app.
+                egui::Key::F3 => power_cycle = true,
                 egui::Key::ArrowRight => machine.input_arrow(true),
                 egui::Key::ArrowLeft => machine.input_arrow(false),
                 egui::Key::Escape => machine.input(ESCAPE, false, false),
@@ -122,4 +128,6 @@ pub fn handle_input(machine: &mut Machine, ctx: &egui::Context) {
             _ => {}
         }
     }
+
+    power_cycle
 }
