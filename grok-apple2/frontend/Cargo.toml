@@ -17,3 +17,4 @@ eframe = { version = "0.35", default-features = false, features = [
 cpal = "0.16"
 serialport = "4"
 rfd = "0.15"
+image = { version = "0.25", default-features = false, features = ["png"] }

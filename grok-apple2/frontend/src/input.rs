@@ -85,6 +85,8 @@ pub struct HostRequests {
     pub toggle_fast_forward: bool,
     /// F7 — toggle audio mute.
     pub toggle_mute: bool,
+    /// F12 — save the current screen to disk as a PNG.
+    pub take_screenshot: bool,
 }
 
 /// Translate this frame's egui keyboard events into emulator input, returning
@@ -95,7 +97,7 @@ pub struct HostRequests {
 ///
 /// While `paused`, emulated keys are swallowed (not forwarded to the frozen
 /// machine), but the host/menu shortcuts (F2 reset, F3 power cycle, F5 pause,
-/// F6 fast-forward, F7 mute) stay live — otherwise F5 couldn't resume.
+/// F6 fast-forward, F7 mute, F12 screenshot) stay live \u2014 otherwise F5 couldn't resume.
 pub fn handle_input(machine: &mut Machine, ctx: &egui::Context, paused: bool) -> HostRequests {
     let mut requests = HostRequests::default();
     if ctx.egui_wants_keyboard_input() {
@@ -130,6 +132,8 @@ pub fn handle_input(machine: &mut Machine, ctx: &egui::Context, paused: bool) ->
                 egui::Key::F5 => requests.toggle_pause = true,
                 egui::Key::F6 => requests.toggle_fast_forward = true,
                 egui::Key::F7 => requests.toggle_mute = true,
+                // F12 is a host-side screenshot shortcut, handled by the app.
+                egui::Key::F12 => requests.take_screenshot = true,
                 // Emulated keys are only forwarded while running.
                 egui::Key::ArrowRight if !paused => machine.input_arrow(true),
                 egui::Key::ArrowLeft if !paused => machine.input_arrow(false),

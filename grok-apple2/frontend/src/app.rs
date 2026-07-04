@@ -128,6 +128,18 @@ impl App {
         };
         self.speed.store(factor, Ordering::Relaxed);
     }
+
+    /// Prompt for a destination and save the currently displayed frame as a PNG.
+    /// Cancelling the dialog is a no-op; write errors are logged, not fatal.
+    fn save_screenshot(&self) {
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("PNG image", &["png"])
+            .set_file_name("apple2-screenshot.png")
+            .save_file()
+        {
+            self.display.save_png(&path);
+        }
+    }
 }
 
 /// The format of a disk image, tracked so a cached image can be re-inserted into
@@ -247,6 +259,9 @@ impl eframe::App for App {
         if requests.toggle_mute {
             self.audio_muted.fetch_xor(true, Ordering::Relaxed);
         }
+        if requests.take_screenshot {
+            self.save_screenshot();
+        }
 
         // Advance the emulation at a fixed 60 Hz regardless of how often eframe
         // repaints (input events can trigger extra repaints). Skipped while
@@ -290,6 +305,7 @@ impl eframe::App for App {
                     UiAction::ToggleMute => {
                         self.audio_muted.fetch_xor(true, Ordering::Relaxed);
                     }
+                    UiAction::Screenshot => self.save_screenshot(),
                     UiAction::InsertCard { slot, kind } => {
                         self.apple2
                             .insert_peripheral(build_card(kind, &self.serial), slot);
