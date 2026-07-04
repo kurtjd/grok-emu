@@ -7,7 +7,7 @@ use eframe::egui;
 use grok_apple2_core::peripheral::serial::SuperSerial;
 use grok_apple2_core::peripheral::{Peripheral, disk, language};
 use grok_apple2_core::{Apple2, settings};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 // The correct ROM files must be placed at the paths below
@@ -20,6 +20,10 @@ const SSC_ROM: [u8; 0x800] = *include_bytes!("../roms/ssc.rom");
 
 const FRAME_RATE: u64 = 60;
 const FRAME_TIME: Duration = Duration::from_nanos(1_000_000_000 / FRAME_RATE);
+
+// Emulation speed multiplier applied while fast-forwarding: the number of frames
+// run per displayed frame, and the audio sink's sample stride (see `CpalAudio`).
+const FAST_FORWARD_FACTOR: u32 = 4;
 
 pub struct App {
     apple2: Machine,
@@ -45,6 +49,11 @@ pub struct App {
     // Mutes the audio output stream when set. Lives in the (never-rebuilt) output
     // stream, so muting persists across power cycles.
     audio_muted: std::sync::Arc<AtomicBool>,
+    // Emulation speed factor (1 = normal, N = Nx fast-forward): the number of
+    // `run_frame` calls per displayed frame. Shared with the audio sink so it can
+    // decimate samples to match (sped-up "chipmunk" audio), so it must be
+    // reattached to the rebuilt sink on a power cycle.
+    speed: std::sync::Arc<AtomicU32>,
     // When true, emulation is frozen: `run_frame` is skipped so the display holds
     // the last frame and the audio ring drains to silence.
     paused: bool,
@@ -54,7 +63,7 @@ pub struct App {
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        let (audio, audio_stream, audio_muted) = audio::init_audio();
+        let (audio, audio_stream, audio_muted, speed) = audio::init_audio();
         // Keep a handle to the ring so a power cycle can build a new sink for the
         // still-running output stream rather than restarting the audio device.
         let audio_ring = audio.ring();
@@ -81,6 +90,7 @@ impl App {
             serial,
             audio_ring,
             audio_muted,
+            speed,
             paused: false,
             _audio_stream: audio_stream,
         }
@@ -92,7 +102,7 @@ impl App {
     /// re-inserted (the floppy stays in the drive across a power cycle); the
     /// audio stream is reattached via the shared ring buffer.
     fn power_cycle(&mut self) {
-        let audio = CpalAudio::new(self.audio_ring.clone());
+        let audio = CpalAudio::new(self.audio_ring.clone(), self.speed.clone());
         self.apple2 = build_machine(audio, &self.slots, &self.serial, &self.disk_images);
         self.next_frame = Instant::now();
     }
@@ -105,6 +115,18 @@ impl App {
         if !paused {
             self.next_frame = Instant::now();
         }
+    }
+
+    /// Toggle fast-forward on/off. The speed factor is the single source of
+    /// truth: it drives both how many frames run per tick and the stride the
+    /// audio sink uses to keep playback in sync.
+    fn toggle_fast_forward(&mut self) {
+        let factor = if self.speed.load(Ordering::Relaxed) == 1 {
+            FAST_FORWARD_FACTOR
+        } else {
+            1
+        };
+        self.speed.store(factor, Ordering::Relaxed);
     }
 }
 
@@ -219,14 +241,26 @@ impl eframe::App for App {
         if requests.toggle_pause {
             self.set_paused(!self.paused);
         }
+        if requests.toggle_fast_forward {
+            self.toggle_fast_forward();
+        }
         if requests.toggle_mute {
             self.audio_muted.fetch_xor(true, Ordering::Relaxed);
         }
 
         // Advance the emulation at a fixed 60 Hz regardless of how often eframe
         // repaints (input events can trigger extra repaints). Skipped while
-        // paused so the machine freezes on the current frame.
+        // paused so the machine freezes on the current frame. While
+        // fast-forwarding, run several frames per tick so emulated time advances
+        // faster; only the last frame is displayed.
         if !self.paused && Instant::now() >= self.next_frame {
+            let steps = self.speed.load(Ordering::Relaxed).max(1);
+            // Run all but the last frame purely to advance state; each
+            // `run_frame` borrows the machine, so we can't keep the earlier
+            // slices around — only the final frame is drawn.
+            for _ in 1..steps {
+                self.apple2.run_frame();
+            }
             let frame = self.apple2.run_frame();
             self.display.update(frame);
 
@@ -245,12 +279,14 @@ impl eframe::App for App {
                 &self.disk_names,
                 &mut self.serial,
                 self.paused,
+                self.speed.load(Ordering::Relaxed) != 1,
                 self.audio_muted.load(Ordering::Relaxed),
             ) {
                 match action {
                     UiAction::Reset => self.apple2.reset(),
                     UiAction::PowerCycle => self.power_cycle(),
                     UiAction::TogglePause => self.set_paused(!self.paused),
+                    UiAction::ToggleFastForward => self.toggle_fast_forward(),
                     UiAction::ToggleMute => {
                         self.audio_muted.fetch_xor(true, Ordering::Relaxed);
                     }
