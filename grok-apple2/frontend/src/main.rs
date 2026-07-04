@@ -9,14 +9,11 @@ use app::App;
 use eframe::egui;
 use grok_apple2_core::settings;
 
-const TITLE: &str = "Apple ][+";
+const TITLE: &str = "Apple ][ - Grok the Planet!";
 /// Extra window height for the top toolbar, above the emulated display.
 const TOOLBAR_HEIGHT: f32 = 28.0;
 
 fn main() -> eframe::Result {
-    let args: Vec<String> = std::env::args().collect();
-    let disk_path = args.get(1).cloned();
-
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(TITLE)
@@ -30,6 +27,6 @@ fn main() -> eframe::Result {
     eframe::run_native(
         TITLE,
         options,
-        Box::new(move |cc| Ok(Box::new(App::new(cc, disk_path)))),
+        Box::new(move |cc| Ok(Box::new(App::new(cc)))),
     )
 }

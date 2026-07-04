@@ -7,7 +7,9 @@ use std::time::Duration;
 // TODO: Make this more flexible by also allowing user to pass in existing port etc
 pub struct StdSerialPort(TTYPort);
 impl StdSerialPort {
-    pub fn new() -> Self {
+    /// Create a virtual serial port backed by a fresh PTY pair, sudo-linking it
+    /// to a stable `/dev/ttyUSB9` path so tools like ADTPro can find it.
+    pub fn pty() -> Self {
         const VIRTUAL_PORT_LINK: &str = "/dev/ttyUSB9";
 
         let (mut master, slave) = TTYPort::pair().expect("Failed to create virtual serial port");
@@ -38,6 +40,25 @@ impl StdSerialPort {
         }
 
         Self(master)
+    }
+
+    /// Open an existing serial device at `path` (e.g. `/dev/ttyUSB0`). Falls back
+    /// to a virtual PTY (with a warning) if the device can't be opened, so the
+    /// card always ends up with a usable port.
+    pub fn open(path: &str) -> Self {
+        match serialport::new(path, 9600)
+            .timeout(Duration::from_millis(0))
+            .open_native()
+        {
+            Ok(port) => {
+                println!("Super Serial Card connected to {path}");
+                Self(port)
+            }
+            Err(e) => {
+                eprintln!("Failed to open serial port {path}: {e}; falling back to virtual PTY");
+                Self::pty()
+            }
+        }
     }
 }
 

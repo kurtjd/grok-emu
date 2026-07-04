@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-grok-apple2-core = { path = "../core" }
+grok-apple2-core = { path = "../core", features = ["std"] }
 eframe = { version = "0.35", default-features = false, features = [
     "glow",
     "wayland",
@@ -16,3 +16,4 @@ eframe = { version = "0.35", default-features = false, features = [
 ] }
 cpal = "0.16"
 serialport = "4"
+rfd = "0.15"

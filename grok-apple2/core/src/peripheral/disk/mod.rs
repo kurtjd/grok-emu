@@ -186,6 +186,12 @@ impl ControllerCard {
             return;
         }
 
+        // Still need to drive the data bus even if no disk is inserted
+        if self.disk_image.is_none() {
+            bus.set_data(self.data_reg);
+            return;
+        }
+
         if !self.write_mode {
             // If in write-protect sense mode, return whether or not disk is write protected
             if self.write_sense {
@@ -215,10 +221,6 @@ impl crate::peripheral::Peripheral for ControllerCard {
     }
 
     fn device_select(&mut self, bus: &mut dyn Bus, _pins: &mut crate::peripheral::Pins) {
-        if self.disk_image.is_none() {
-            return;
-        }
-
         let addr = (bus.addr() & 0xF) as u8;
         match addr {
             // Off

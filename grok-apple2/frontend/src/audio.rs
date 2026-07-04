@@ -16,6 +16,21 @@ pub struct CpalAudio {
     ring: Arc<Mutex<VecDeque<f32>>>,
 }
 
+impl CpalAudio {
+    /// Build a sink feeding the given ring buffer. Used to attach a freshly
+    /// rebuilt emulator (e.g. after a power cycle) to the already-running output
+    /// stream instead of tearing the audio device down and back up.
+    pub fn new(ring: Arc<Mutex<VecDeque<f32>>>) -> Self {
+        Self { ring }
+    }
+
+    /// A handle to the shared ring buffer, so another sink can later be built for
+    /// the same output stream.
+    pub fn ring(&self) -> Arc<Mutex<VecDeque<f32>>> {
+        self.ring.clone()
+    }
+}
+
 impl grok_apple2_core::Audio for CpalAudio {
     fn feed_samples(&mut self, samples: &[bool]) {
         let mut ring = self.ring.lock().unwrap();
