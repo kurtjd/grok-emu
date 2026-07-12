@@ -6,18 +6,14 @@ pub(crate) mod video;
 use crate::mem_map;
 use grok_6502::bus::Bus;
 
-pub trait Audio {
-    fn feed_samples(&mut self, samples: &[bool]);
-}
-
-pub(crate) struct Io<A: Audio> {
+pub(crate) struct Io {
     pub(crate) keyboard: keyboard::Keyboard,
     pub(crate) video: video::Video,
-    pub(crate) speaker: speaker::Speaker<A>,
+    pub(crate) speaker: speaker::Speaker,
     pub(crate) game: game::Game,
 }
 
-impl<A: Audio> Io<A> {
+impl Io {
     pub(crate) fn decode(&mut self, bus: &mut dyn Bus) {
         match bus.addr() {
             mem_map::KEYBOARD_EN..mem_map::KEYBOARD_CLR => self.keyboard.decode(bus),

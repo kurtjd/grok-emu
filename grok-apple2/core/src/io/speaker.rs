@@ -1,34 +1,31 @@
-use super::Audio;
 use crate::settings;
 
 const CYCLES_PER_SAMPLE: u32 = settings::CPU_CLK_SPEED / settings::SAMPLE_RATE;
+const SAMPLES_PER_FRAME: usize = (settings::CYCLES_PER_FRAME / CYCLES_PER_SAMPLE) as usize;
 
-pub(crate) struct Speaker<A: Audio> {
-    audio: A,
+pub(crate) struct Speaker {
     prev_polarity: bool,
     polarity: bool,
-    polarity_change: bool,
     cycles: u32,
-    // TODO: Remove std dep
-    samples: Vec<bool>,
+    samples_idx: usize,
+    samples: [bool; SAMPLES_PER_FRAME],
 }
 
-impl<A: Audio> Speaker<A> {
-    pub(crate) fn new(audio: A) -> Self {
+impl Speaker {
+    pub(crate) fn new() -> Self {
         Speaker {
-            audio,
             prev_polarity: false,
             polarity: false,
-            polarity_change: false,
             cycles: 0,
-            samples: Vec::new(),
+            samples_idx: 0,
+            samples: [false; SAMPLES_PER_FRAME],
         }
     }
 
-    pub(crate) fn reset(&mut self) {
+    pub(crate) fn begin_frame(&mut self) {
         self.cycles = 0;
-        self.samples.clear();
-        self.polarity_change = false;
+        self.samples_idx = 0;
+        self.samples = [false; SAMPLES_PER_FRAME];
         self.prev_polarity = self.polarity;
     }
 
@@ -36,11 +33,9 @@ impl<A: Audio> Speaker<A> {
         self.cycles += 1;
 
         if self.cycles >= CYCLES_PER_SAMPLE {
-            self.samples.push(self.polarity);
+            self.samples[self.samples_idx] = self.polarity;
+            self.samples_idx += 1;
             self.cycles = 0;
-            if self.polarity != self.prev_polarity {
-                self.polarity_change = true;
-            }
         }
     }
 
@@ -48,12 +43,7 @@ impl<A: Audio> Speaker<A> {
         self.polarity = !self.polarity;
     }
 
-    pub(crate) fn feed_samples(&mut self) {
-        // Note: Only feeding on poalrity change I think is more of an SDL issue and
-        // should likely be removed from here once that is cleaned up
-        if self.polarity_change {
-            self.audio.feed_samples(&self.samples);
-        }
-        self.reset();
+    pub(crate) fn samples(&mut self) -> &[bool] {
+        &self.samples
     }
 }
