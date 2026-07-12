@@ -2,8 +2,6 @@ pub mod io;
 mod memory;
 pub mod peripheral;
 
-pub use io::Audio;
-
 mod mem_map {
     pub const RAM: u16 = 0x0000;
 
@@ -34,11 +32,14 @@ mod mem_map {
 }
 
 pub mod settings {
+    use crate::io::video;
+
     pub const CPU_CLK_SPEED: u32 = 1024000;
     pub const DISP_WIDTH: u32 = 280;
     pub const DISP_HEIGHT: u32 = 192;
     pub const DISP_SCALE: u32 = 3;
     pub const SAMPLE_RATE: u32 = 44100;
+    pub const CYCLES_PER_FRAME: u32 = video::VSCAN_MAX as u32 * video::HSCAN_MAX as u32;
 }
 
 use grok_6502::Cpu;
@@ -50,17 +51,22 @@ use io::video::{self, CHAR_ROM_SIZE, Video};
 use memory::{ROM_SIZE, Ram, Rom};
 use peripheral::{Peripheral, PeripheralHandle, Peripherals};
 
-pub struct Apple2<'a, A: Audio> {
+pub struct Frame<'a> {
+    pub video: &'a [u32],
+    pub audio: &'a [bool],
+}
+
+pub struct Apple2<'a> {
     bus: SimpleBus,
     cpu: Cpu,
     rom: Rom,
     ram: Ram,
-    io: Io<A>,
+    io: Io,
     peripherals: Peripherals<'a>,
 }
 
-impl<'a, A: Audio> Apple2<'a, A> {
-    pub fn new(fw_rom: [u8; ROM_SIZE], char_rom: [u8; CHAR_ROM_SIZE], audio: A) -> Self {
+impl<'a> Apple2<'a> {
+    pub fn new(fw_rom: [u8; ROM_SIZE], char_rom: [u8; CHAR_ROM_SIZE]) -> Self {
         let bus = SimpleBus::new();
         let cpu = Cpu::new();
 
@@ -68,7 +74,7 @@ impl<'a, A: Audio> Apple2<'a, A> {
         let rom = Rom::new(fw_rom);
 
         let video = Video::new(char_rom);
-        let speaker = Speaker::new(audio);
+        let speaker = Speaker::new();
         let keyboard = Keyboard::new();
         let io = Io {
             keyboard,
@@ -97,7 +103,9 @@ impl<'a, A: Audio> Apple2<'a, A> {
         self.reset();
     }
 
-    pub fn run_frame(&mut self) -> &[u32] {
+    pub fn run_frame(&mut self) -> Frame<'_> {
+        self.io.speaker.begin_frame();
+
         // Tick the various components for this frame
         for vscan in 0..video::VSCAN_MAX {
             for hscan in 0..video::HSCAN_MAX {
@@ -134,10 +142,10 @@ impl<'a, A: Audio> Apple2<'a, A> {
             }
         }
 
-        // We've collected samples during the frame, so feed them to the audio output
-        self.io.speaker.feed_samples();
-
-        self.io.video.render()
+        // Return the frame video and audio samples
+        let video = self.io.video.render();
+        let audio = self.io.speaker.samples();
+        Frame { video, audio }
     }
 
     pub fn input(&mut self, char: u8, shift: bool, ctrl: bool) {

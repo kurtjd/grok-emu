@@ -51,16 +51,16 @@ pub struct App {
     // User-editable Super Serial Card settings (port source + DIP switches),
     // applied whenever an SSC is built.
     serial: SerialConfig,
-    // A handle to the audio ring buffer shared with the live output stream, used
-    // to build a fresh sink for the emulator when it's rebuilt on a power cycle.
-    audio_ring: std::sync::Arc<std::sync::Mutex<std::collections::VecDeque<f32>>>,
+    // Audio sink: the emulator's per-frame samples are pushed here, and it feeds
+    // the ring buffer drained by the live output stream. Owned by the app (not the
+    // machine), so it survives a power cycle without needing to be reattached.
+    audio: CpalAudio,
     // Mutes the audio output stream when set. Lives in the (never-rebuilt) output
     // stream, so muting persists across power cycles.
     audio_muted: std::sync::Arc<AtomicBool>,
     // Emulation speed factor (1 = normal, N = Nx fast-forward): the number of
     // `run_frame` calls per displayed frame. Shared with the audio sink so it can
-    // decimate samples to match (sped-up "chipmunk" audio), so it must be
-    // reattached to the rebuilt sink on a power cycle.
+    // decimate samples to match (sped-up "chipmunk" audio).
     speed: std::sync::Arc<AtomicU32>,
     // When true, emulation is frozen: `run_frame` is skipped so the display holds
     // the last frame and the audio ring drains to silence.
@@ -78,9 +78,6 @@ pub struct App {
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let (audio, audio_stream, audio_muted, speed) = audio::init_audio();
-        // Keep a handle to the ring so a power cycle can build a new sink for the
-        // still-running output stream rather than restarting the audio device.
-        let audio_ring = audio.ring();
 
         // Default layout: Language Card in slot 0, Disk II controller in slot 6.
         let mut slots = [None; 8];
@@ -92,7 +89,7 @@ impl App {
         let disk_images: [Option<StoredDisk>; 8] = std::array::from_fn(|_| None);
 
         let serial = SerialConfig::default();
-        let apple2 = build_machine(audio, &slots, &serial, &disk_images);
+        let apple2 = build_machine(&slots, &serial, &disk_images);
 
         App {
             apple2,
@@ -102,7 +99,7 @@ impl App {
             disk_names,
             disk_images,
             serial,
-            audio_ring,
+            audio,
             audio_muted,
             speed,
             paused: false,
@@ -117,10 +114,9 @@ impl App {
     /// machine and build a brand-new one, giving cleared RAM, reset soft
     /// switches, reset peripheral state, and a fresh CPU. Inserted disks are
     /// re-inserted (the floppy stays in the drive across a power cycle); the
-    /// audio stream is reattached via the shared ring buffer.
+    /// audio sink lives in the app, so it keeps playing without being touched.
     fn power_cycle(&mut self) {
-        let audio = CpalAudio::new(self.audio_ring.clone(), self.speed.clone());
-        self.apple2 = build_machine(audio, &self.slots, &self.serial, &self.disk_images);
+        self.apple2 = build_machine(&self.slots, &self.serial, &self.disk_images);
         self.next_frame = Instant::now();
     }
 
@@ -322,12 +318,11 @@ struct StoredDisk {
 /// Build a fresh emulator from the current slot/serial/disk configuration. Used
 /// both at startup and on every power cycle.
 fn build_machine(
-    audio: CpalAudio,
     slots: &[Option<CardKind>; 8],
     serial: &SerialConfig,
     disk_images: &[Option<StoredDisk>; 8],
 ) -> Machine {
-    let mut apple2 = Apple2::new(FW_ROM, CHAR_ROM, audio);
+    let mut apple2 = Apple2::new(FW_ROM, CHAR_ROM);
     for (slot, kind) in slots.iter().enumerate() {
         let Some(kind) = *kind else { continue };
         apple2.insert_peripheral(build_card(kind, serial), slot);
@@ -444,14 +439,16 @@ impl eframe::App for App {
         // faster; only the last frame is displayed.
         if !self.paused && Instant::now() >= self.next_frame {
             let steps = self.speed.load(Ordering::Relaxed).max(1);
-            // Run all but the last frame purely to advance state; each
-            // `run_frame` borrows the machine, so we can't keep the earlier
-            // slices around — only the final frame is drawn.
+            // Run all but the last frame purely to advance state, but still push
+            // each frame's audio so fast-forward stays pitched up; only the final
+            // frame's video is drawn.
             for _ in 1..steps {
-                self.apple2.run_frame();
+                let frame = self.apple2.run_frame();
+                self.audio.push_samples(frame.audio);
             }
             let frame = self.apple2.run_frame();
-            self.display.update(frame);
+            self.audio.push_samples(frame.audio);
+            self.display.update(frame.video);
 
             self.next_frame += FRAME_TIME;
             // If we've fallen behind, resync rather than trying to catch up forever.

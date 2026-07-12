@@ -4,42 +4,35 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
-/// The fully-assembled emulator, parameterized over our cpal audio backend.
-pub type Machine = Apple2<'static, CpalAudio>;
+/// The fully-assembled emulator.
+pub type Machine = Apple2<'static>;
 
 const SAMPLE_VOLUME: f32 = 0.5;
 /// Cap the audio ring buffer so it can't grow unbounded if the output stream stalls.
 const AUDIO_BUF_MAX: usize = settings::SAMPLE_RATE as usize / 4; // ~250ms of samples
+/// One-pole DC-blocker feedback coefficient. The speaker emits an absolute
+/// polarity level (±SAMPLE_VOLUME), so silence sits at a constant DC offset; a
+/// real Apple II speaker is AC-coupled and can't hold that. This high-pass lets
+/// a held level decay toward zero (cutoff ~35 Hz at 44.1 kHz), so silence is
+/// truly silent and a momentary ring underrun can't step against a DC bias.
+const DC_BLOCK_R: f32 = 0.995;
 
-/// Implements the core `Audio` trait by pushing square-wave samples into a ring
-/// buffer that the cpal output stream drains on its own thread.
+/// Pushes square-wave samples produced by the emulator into a ring buffer that
+/// the cpal output stream drains on its own thread.
 pub struct CpalAudio {
     ring: Arc<Mutex<VecDeque<f32>>>,
     // Emulation speed factor (1 = normal, N = Nx fast-forward), shared with the
     // app. At Nx the emulator produces N samples for every one the output
-    // consumes, so `feed_samples` keeps only every Nth: the ring fills at the
+    // consumes, so `push_samples` keeps only every Nth: the ring fills at the
     // normal rate while spanning Nx the emulated time, giving sped-up "chipmunk"
     // playback instead of overrunning the ring.
     speed: Arc<AtomicU32>,
 }
 
 impl CpalAudio {
-    /// Build a sink feeding the given ring buffer. Used to attach a freshly
-    /// rebuilt emulator (e.g. after a power cycle) to the already-running output
-    /// stream instead of tearing the audio device down and back up.
-    pub fn new(ring: Arc<Mutex<VecDeque<f32>>>, speed: Arc<AtomicU32>) -> Self {
-        Self { ring, speed }
-    }
-
-    /// A handle to the shared ring buffer, so another sink can later be built for
-    /// the same output stream.
-    pub fn ring(&self) -> Arc<Mutex<VecDeque<f32>>> {
-        self.ring.clone()
-    }
-}
-
-impl grok_apple2_core::Audio for CpalAudio {
-    fn feed_samples(&mut self, samples: &[bool]) {
+    /// Push a frame's worth of square-wave polarity samples into the ring buffer
+    /// that the cpal output stream drains on its own thread.
+    pub fn push_samples(&mut self, samples: &[bool]) {
         // Keep every `stride`th sample: at 1x that's all of them; at Nx it drops
         // the extra samples fast-forward produces so playback speeds up in pitch
         // rather than flooding the ring. A square-wave beeper doesn't care about
@@ -67,6 +60,12 @@ where
     T: cpal::SizedSample + cpal::FromSample<f32>,
 {
     let channels = config.channels as usize;
+    // DC-blocker state (x[n-1], y[n-1]) and the last popped sample, held across
+    // callbacks. `last_popped` conceals a momentary ring underrun by repeating
+    // the current level instead of snapping to 0.0 (which would click).
+    let mut last_in = 0.0f32;
+    let mut last_out = 0.0f32;
+    let mut last_popped = 0.0f32;
     device
         .build_output_stream(
             config,
@@ -75,9 +74,19 @@ where
                 let muted = muted.load(Ordering::Relaxed);
                 for frame in out.chunks_mut(channels) {
                     // Drain the ring even when muted so it stays in sync with the
-                    // emulator; just emit silence instead of the popped sample.
-                    let popped = ring.pop_front().unwrap_or(0.0);
-                    let sample = T::from_sample(if muted { 0.0 } else { popped });
+                    // emulator. On underrun, hold the last level rather than
+                    // jumping to 0.0.
+                    let x = ring.pop_front().unwrap_or(last_popped);
+                    last_popped = x;
+
+                    // One-pole high-pass (DC blocker): y = x - x_prev + R*y_prev.
+                    // Removes the constant DC offset the beeper leaves during
+                    // silence so it decays to zero instead of clicking.
+                    let y = x - last_in + DC_BLOCK_R * last_out;
+                    last_in = x;
+                    last_out = y;
+
+                    let sample = T::from_sample(if muted { 0.0 } else { y });
                     frame.fill(sample);
                 }
             },
