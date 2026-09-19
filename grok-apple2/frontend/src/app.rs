@@ -1,4 +1,5 @@
 use crate::audio::{self, CpalAudio, Machine};
+use crate::binary::{BinaryLoadAction, BinaryLoadDialog};
 use crate::gui::{self, CardKind, ScreenAspect, SerialConfig, SerialPortSource, UiAction};
 use crate::input;
 use crate::serial::StdSerialPort;
@@ -65,6 +66,7 @@ pub struct App {
     // When true, emulation is frozen: `run_frame` is skipped so the display holds
     // the last frame and the audio ring drains to silence.
     paused: bool,
+    binary_dialog: Option<BinaryLoadDialog>,
     // How the emulated display is fitted to the window (square pixels vs 4:3).
     aspect: ScreenAspect,
     // Fullscreen overlay bookkeeping: whether we were fullscreen last frame (to
@@ -103,6 +105,7 @@ impl App {
             audio_muted,
             speed,
             paused: false,
+            binary_dialog: None,
             aspect: ScreenAspect::default(),
             was_fullscreen: false,
             fullscreen_entered_at: None,
@@ -154,6 +157,61 @@ impl App {
         }
     }
 
+    fn open_binary(&mut self) {
+        let path = rfd::FileDialog::new()
+            .set_title("Load Binary")
+            .add_filter("Binary", &["bin"])
+            .add_filter("All files", &["*"])
+            .pick_file();
+        self.next_frame = Instant::now();
+        let Some(path) = path else { return };
+        match std::fs::read(&path) {
+            Ok(data) => {
+                let name = path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned();
+                self.binary_dialog = Some(BinaryLoadDialog::new(name, data));
+            }
+            Err(error) => {
+                rfd::MessageDialog::new()
+                    .set_level(rfd::MessageLevel::Error)
+                    .set_title("Unable to Load Binary")
+                    .set_description(format!("{}: {error}", path.display()))
+                    .show();
+            }
+        }
+    }
+
+    fn show_binary_dialog(&mut self, ctx: &egui::Context) {
+        let Some(dialog) = &mut self.binary_dialog else {
+            return;
+        };
+        let action = dialog.show(ctx);
+        let result = match action {
+            Some(BinaryLoadAction::LoadDos33) => Some(self.apple2.load_ram_dos33(&dialog.data)),
+            Some(BinaryLoadAction::LoadDirect { address }) => {
+                Some(self.apple2.load_ram_direct(address, &dialog.data))
+            }
+            _ => None,
+        };
+        let close = match result {
+            Some(Ok(())) => true,
+            Some(Err(_)) => {
+                dialog.error =
+                    Some("The binary must fit in main RAM ($0000-$BFFF / 0-49151).".to_owned());
+                false
+            }
+            None => matches!(action, Some(BinaryLoadAction::Cancel)),
+        };
+        if close {
+            self.binary_dialog = None;
+            self.next_frame = Instant::now();
+            ctx.request_repaint();
+        }
+    }
+
     /// Render the toolbar contents (menu bar + action buttons) into `ui`, returning
     /// the action the user triggered. Shared by the docked (windowed) toolbar and
     /// the floating fullscreen overlay.
@@ -177,6 +235,7 @@ impl App {
     /// flip it on a fullscreen toggle.
     fn apply_action(&mut self, action: UiAction, ctx: &egui::Context, fullscreen: bool) {
         match action {
+            UiAction::LoadBinary => self.open_binary(),
             UiAction::Reset => self.apple2.reset(),
             UiAction::PowerCycle => self.power_cycle(),
             UiAction::TogglePause => self.set_paused(!self.paused),
@@ -229,7 +288,7 @@ impl App {
     /// reflows the display the way a docked panel would.
     fn fullscreen_overlay(&mut self, ctx: &egui::Context) {
         let idle = ctx.input(|i| i.pointer.time_since_last_movement());
-        let show = idle < FS_REVEAL_SECS;
+        let show = idle < FS_REVEAL_SECS || self.binary_dialog.is_some();
         let alpha =
             ctx.animate_bool_with_time(egui::Id::new("fs_toolbar_fade"), show, FS_FADE_SECS);
 
@@ -412,7 +471,11 @@ impl eframe::App for App {
         // handled inside `handle_input` since they touch the whole app, not just
         // the machine, so they bubble up as requests here. Emulated keys are
         // swallowed while paused.
-        let requests = input::handle_input(&mut self.apple2, &ctx, self.paused);
+        let requests = if self.binary_dialog.is_some() {
+            input::HostRequests::default()
+        } else {
+            input::handle_input(&mut self.apple2, &ctx, self.paused)
+        };
         if requests.power_cycle {
             self.power_cycle();
         }
@@ -437,7 +500,7 @@ impl eframe::App for App {
         // paused so the machine freezes on the current frame. While
         // fast-forwarding, run several frames per tick so emulated time advances
         // faster; only the last frame is displayed.
-        if !self.paused && Instant::now() >= self.next_frame {
+        if !self.paused && self.binary_dialog.is_none() && Instant::now() >= self.next_frame {
             let steps = self.speed.load(Ordering::Relaxed).max(1);
             // Run all but the last frame purely to advance state, but still push
             // each frame's audio so fast-forward stays pitched up; only the final
@@ -477,10 +540,12 @@ impl eframe::App for App {
             self.display.draw(ui);
         });
 
+        self.show_binary_dialog(&ctx);
+
         // Wake us up in time for the next emulated frame. While paused there's no
         // next frame, so we don't schedule a repaint: egui idles and repaints
         // only on interaction (which is how the Resume button stays responsive).
-        if !self.paused {
+        if !self.paused && self.binary_dialog.is_none() {
             let wait = self.next_frame.saturating_duration_since(Instant::now());
             ctx.request_repaint_after(wait);
         }
