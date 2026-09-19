@@ -95,6 +95,25 @@ impl<'a> Apple2<'a> {
         }
     }
 
+    pub fn load_ram_direct(
+        &mut self,
+        addr: usize,
+        data: &[u8],
+    ) -> Result<(), memory::OutOfBoundsError> {
+        self.ram.load(addr, data)
+    }
+
+    pub fn load_ram_dos33(&mut self, data: &[u8]) -> Result<(), memory::OutOfBoundsError> {
+        let addr = u16::from_le_bytes(
+            data.get(0..2)
+                .ok_or(memory::OutOfBoundsError)?
+                .try_into()
+                .unwrap(),
+        );
+        // The next 2 bytes would be the length but we already know that from data.len()
+        self.ram.load(addr as usize, &data[4..])
+    }
+
     pub fn reset(&mut self) {
         self.cpu.reset(&mut self.bus);
     }

@@ -5,6 +5,10 @@ use grok_6502::bus::{self, Bus};
 const RAM_SIZE: usize = 48 * 1024;
 pub(crate) const ROM_SIZE: usize = 12 * 1024;
 
+/// Attempted to index into an out-of-bound memory region.
+#[derive(Clone, Copy, Debug)]
+pub struct OutOfBoundsError;
+
 pub(crate) struct Ram {
     data: [u8; RAM_SIZE],
 }
@@ -14,6 +18,15 @@ impl Ram {
         Ram {
             data: [0; RAM_SIZE],
         }
+    }
+
+    pub(crate) fn load(&mut self, addr: usize, data: &[u8]) -> Result<(), OutOfBoundsError> {
+        let end = addr.checked_add(data.len()).ok_or(OutOfBoundsError)?;
+        self.data
+            .get_mut(addr..end)
+            .ok_or(OutOfBoundsError)?
+            .copy_from_slice(data);
+        Ok(())
     }
 
     pub(crate) fn decode(&mut self, bus: &mut dyn Bus) {
