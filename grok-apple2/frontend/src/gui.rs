@@ -80,6 +80,7 @@ pub enum ScreenAspect {
 
 /// An action requested via the toolbar, executed by the app.
 pub enum UiAction {
+    LoadBinary,
     Reset,
     /// Cold boot: power the machine off and back on (clears RAM, etc.).
     PowerCycle,
@@ -155,6 +156,13 @@ pub fn menu_bar(
     egui::containers::menu::MenuBar::new()
         .config(config)
         .ui(ui, |ui| {
+            ui.menu_button("File", |ui| {
+                if ui.button("Load Binary...").clicked() {
+                    action = Some(UiAction::LoadBinary);
+                    ui.close();
+                }
+            });
+
             ui.menu_button("Slots", |ui| {
                 // Don't wrap long card names; let the menu widen to fit them.
                 ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);

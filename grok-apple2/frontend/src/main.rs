@@ -1,5 +1,6 @@
 mod app;
 mod audio;
+mod binary;
 mod gui;
 mod input;
 mod serial;
